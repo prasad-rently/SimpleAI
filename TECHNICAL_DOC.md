@@ -18,6 +18,7 @@
   - [Step 02 — Verify PyTorch](#step-02--verify-pytorch)
   - [Step 03 — Training Data](#step-03--training-data)
   - [Step 04 — Character Vocabulary](#step-04--character-vocabulary)
+  - [Step 05 — Training Sequences](#step-05--training-sequences)
 - [Glossary](#glossary)
 
 ---
@@ -461,6 +462,115 @@ main()
 
 ---
 
+#### `src/dataset.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Turn text into training pairs (input, target) the model can learn from |
+| **Created in** | Step 05 |
+| **Run with** | `PYTHONPATH=src python src/dataset.py` |
+| **Input** | Reads `data/input.txt`, uses `Vocabulary` from `vocabulary.py` |
+| **Output** | Printed training pair examples, shape info, shift verification |
+| **Imported by** | `train.py` (Step 09) |
+
+**Classes:**
+
+| Class | Parent | Description |
+|-------|--------|-------------|
+| `TextDataset` | `torch.utils.data.Dataset` | Creates (input, target) pairs from encoded text |
+
+**TextDataset class — Methods:**
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `__init__(text, vocab, seq_length)` | `text` (str), `vocab` (Vocabulary), `seq_length` (int, default=50) | None | Encodes full text into tensor, calculates number of examples |
+| `__len__()` | None | `int` | Returns total number of training examples |
+| `__getitem__(idx)` | `idx` (int): example index | `tuple[Tensor, Tensor]` | Returns (input, target) pair, each of shape `(seq_length,)` |
+
+**TextDataset class — Attributes:**
+
+| Attribute | Type | Description | Example value |
+|-----------|------|-------------|---------------|
+| `vocab` | `Vocabulary` | The vocabulary used for encoding/decoding | (from Step 04) |
+| `seq_length` | `int` | Number of characters per training example | `50` |
+| `data` | `Tensor` | The entire text encoded as a 1D tensor of integers | `tensor([19, 29, 26, 1, ...])` shape `(6201,)` |
+| `num_examples` | `int` | How many complete training pairs fit | `124` |
+
+**Standalone functions:**
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `demonstrate_training_pairs(dataset, vocab, num_examples)` | dataset, vocab, count | Shows training pairs as both text and numbers with position-by-position breakdown |
+| `demonstrate_data_shapes(dataset)` | dataset | Shows tensor shapes, dtypes, and verifies the input→target shift |
+| `main()` | None | Loads text, builds vocab, creates dataset, runs all demos |
+
+**Detailed Flow:**
+
+```
+main()
+  │
+  ├── Load data/input.txt → text (6201 chars)
+  │
+  ├── Build Vocabulary(text) → vocab (48 chars, from Step 04)
+  │
+  ├── Create TextDataset(text, vocab, seq_length=50)
+  │   │
+  │   ├── vocab.encode(text) → [19, 29, 26, 1, 36, ...] (6201 ints)
+  │   ├── torch.tensor(encoded) → tensor of shape (6201,)
+  │   └── num_examples = (6201 - 1) ÷ 50 = 124
+  │
+  ├── demonstrate_training_pairs()
+  │   │
+  │   ├── dataset[0]:
+  │   │   input  = data[0:50]   "The only way to do great work is to love what you "
+  │   │   target = data[1:51]   "he only way to do great work is to love what you d"
+  │   │
+  │   │   Position 0: input='T' → target='h'  (after T, predict h)
+  │   │   Position 1: input='h' → target='e'  (after h, predict e)
+  │   │   Position 2: input='e' → target=' '  (after e, predict space)
+  │   │   ...
+  │   │
+  │   ├── dataset[1]:
+  │   │   input  = data[50:100]  "do.\nIn the middle of difficulty..."
+  │   │   target = data[51:101]  "o.\nIn the middle of difficulty l..."
+  │   │
+  │   └── dataset[2]:
+  │       input  = data[100:150] "Life is what happens when you..."
+  │       target = data[101:151] "ife is what happens when you ..."
+  │
+  ├── demonstrate_data_shapes()
+  │   │
+  │   ├── Full data:   shape (6201,), dtype int64
+  │   ├── One input:   shape (50,),   dtype int64
+  │   ├── One target:  shape (50,),   dtype int64
+  │   └── Shift proof: target[0]=data[1], target[1]=data[2], ...
+  │
+  └── Preview Step 06: batching with DataLoader
+```
+
+**The input→target shift visualized:**
+
+```
+data:    [19, 29, 26,  1, 36, 35, 33, 46, ...]
+          T    h   e   _   o    n   l    y
+
+input:   [19, 29, 26,  1, 36]     ← positions 0-4
+target:  [29, 26,  1, 36, 35]     ← positions 1-5 (shifted by 1)
+          ↑
+          "After T(19), the next char should be h(29)"
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Training pair** | An (input, target) pair. The model sees the input and tries to predict the target. | input="The o", target="he on" |
+| **Sequence length** | How many characters per training example. Controls context window size. | 50 chars (real LLMs: 4096+) |
+| **Input→target shift** | Target is the input shifted right by 1 character. Each position: predict the next char. | input[0]='T' → target[0]='h' |
+| **PyTorch Dataset** | A class with `__len__` and `__getitem__` methods. Standard way to serve training data. | `dataset[0]` returns one (input, target) pair |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -602,6 +712,48 @@ data/input.txt ──(read by)──▶ explore_data.py ──(prints)──▶ 
 
 ---
 
+### Step 05 — Training Sequences
+
+**What was built:** A `TextDataset` class that chops text into (input, target) training pairs.
+
+**Why it matters:** The model learns by seeing thousands of examples of "given these characters, predict the next one." This step creates those examples by encoding the full text and slicing it into overlapping input/target pairs where the target is the input shifted by one character.
+
+```
+What changed:
+  + src/dataset.py      ← TextDataset class + training pair demos
+
+Run:
+  PYTHONPATH=src python src/dataset.py
+
+Expected output:
+  124 training pairs, character-by-character alignment showing
+  how each input position maps to its target, tensor shapes
+```
+
+**Key takeaway:** The model's entire learning signal comes from predicting the next character. Input position 0 says "T", target says "h" — so the model learns that "h" often follows "T". Repeated across 124 examples × 50 positions = 6,200 learning signals per epoch.
+
+**The flow so far:**
+
+```
+data/input.txt
+       │
+       ├──(read by)──▶ explore_data.py → stats, frequency chart
+       │
+       ├──(read by)──▶ vocabulary.py
+       │                  └── Vocabulary class
+       │                       .encode("The") → [19, 29, 26]
+       │                       .decode([19,29,26]) → "The"
+       │
+       └──(read by)──▶ dataset.py
+                          └── TextDataset class (uses Vocabulary)
+                               .data = tensor([19, 29, 26, ...])  (6201 ints)
+                               dataset[0] → (input[0:50], target[1:51])
+                               dataset[1] → (input[50:100], target[51:101])
+                               ...124 total training pairs
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -625,6 +777,10 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **char_to_idx** | Dictionary that maps each character to its number. The encoding lookup table. | Step 04 |
 | **idx_to_char** | Reverse dictionary that maps each number back to its character. The decoding lookup table. | Step 04 |
 | **Deterministic** | Same input always gives same output. Important for reproducibility in AI. | Step 04 |
+| **Training pair** | An (input, target) example. Model sees input, tries to predict target. Target = input shifted by 1. | Step 05 |
+| **Sequence length** | How many characters per training example. Our model uses 50; real LLMs use 4096+. | Step 05 |
+| **PyTorch Dataset** | A class with `__len__` and `__getitem__` — the standard way to serve training data in PyTorch. | Step 05 |
+| **Input→target shift** | Target is the input shifted right by 1 char. Position 0: input='T', target='h'. | Step 05 |
 | **Embedding** | Converting a token number into a rich vector of floats that captures meaning. | Step 07 (upcoming) |
 | **Loss** | A number that measures how wrong the model's predictions are. Lower = better. | Step 08 (upcoming) |
 | **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
@@ -637,4 +793,4 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 04.*
+> *This document is updated with each new step. Last updated: Step 05.*
