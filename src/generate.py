@@ -49,13 +49,50 @@ GREEDY vs SAMPLING:
       → Can produce surprising or nonsensical text.
       → Controlled by "temperature" (Step 13).
 
-    This step uses GREEDY. Step 13 adds temperature-controlled sampling.
+    Step 12 uses GREEDY. Step 13 adds temperature-controlled sampling.
+
+WHAT IS TEMPERATURE?
+    Temperature controls how "creative" or "safe" the model is when
+    picking the next character. It works by scaling the logits (raw
+    scores) BEFORE converting them to probabilities:
+
+    scaled_logits = logits / temperature
+
+    Low temperature (0.3):
+      → Makes high scores MUCH higher, low scores MUCH lower
+      → Model almost always picks the top choice
+      → Output is safe, predictable, close to training data
+      → Like a cautious writer who sticks to what they know
+
+    Temperature = 1.0 (default):
+      → No scaling — uses the model's natural confidence
+      → Balanced between predictable and creative
+      → Like a writer in their normal state
+
+    High temperature (1.5+):
+      → Flattens the score distribution
+      → Lower-probability characters get picked more often
+      → Output is wild, creative, sometimes nonsensical
+      → Like a writer who's had too much coffee
+
+    MATH EXAMPLE:
+      Logits: [8.0, 5.0, 2.0, 1.0]  (model's raw scores)
+
+      Temperature 0.3:  [26.7, 16.7, 6.7, 3.3] → softmax → [0.99, 0.01, 0.00, 0.00]
+        → Almost certainly picks the first character
+
+      Temperature 1.0:  [8.0, 5.0, 2.0, 1.0]   → softmax → [0.93, 0.05, 0.01, 0.01]
+        → Strongly favors first, but others have a small chance
+
+      Temperature 2.0:  [4.0, 2.5, 1.0, 0.5]   → softmax → [0.62, 0.21, 0.09, 0.07]
+        → Much more spread out — lower options now have real chances
 
 WHAT THIS FILE PROVIDES:
-    1. load_model()     — load trained weights from disk
+    1. load_model()      — load trained weights from disk
     2. load_vocabulary() — load vocabulary mappings from disk
-    3. generate_text()  — generate text character by character
-    4. main()           — demo: load model + generate several examples
+    3. generate_text()   — generate text with GREEDY decoding (Step 12)
+    4. generate_text_with_temperature() — generate with temperature sampling (Step 13)
+    5. main()            — demo: compare greedy vs temperatures
 
 INPUT:  outputs/model.pth, outputs/vocab.pth
 OUTPUT: Printed generated text
@@ -324,15 +361,172 @@ def generate_text(model, vocab_data, seed_text="The", length=200):
     return ''.join(generated_chars)
 
 
+def generate_text_with_temperature(model, vocab_data, seed_text="The",
+                                    length=200, temperature=1.0):
+    """
+    Generate text with temperature-controlled sampling.
+
+    This is the CREATIVE version of generate_text(). Instead of always
+    picking the highest-scoring character (greedy), we:
+    1. Scale the scores by temperature
+    2. Convert to probabilities using softmax
+    3. SAMPLE from the probability distribution
+
+    This means lower-probability characters have a chance of being picked,
+    making the output more varied and surprising.
+
+    HOW TEMPERATURE CHANGES THE PROBABILITIES:
+
+        Model outputs logits: [8.0, 5.0, 2.0, 1.0] for chars [a, b, c, d]
+
+        Temperature 0.3 (cautious):
+          scaled = [26.7, 16.7, 6.7, 3.3]
+          probs  = [0.9997, 0.0003, 0.0000, 0.0000]
+          → 'a' almost always wins. Very predictable.
+
+        Temperature 1.0 (balanced):
+          scaled = [8.0, 5.0, 2.0, 1.0]   (no change)
+          probs  = [0.933, 0.046, 0.002, 0.001]
+          → 'a' usually wins, but 'b' has ~5% chance.
+
+        Temperature 2.0 (creative):
+          scaled = [4.0, 2.5, 1.0, 0.5]
+          probs  = [0.621, 0.215, 0.049, 0.030]
+          → 'a' still favored, but 'b' has ~22% chance.
+             Even 'c' and 'd' might occasionally appear.
+
+    WHAT IS softmax?
+        Converts raw scores (logits) into probabilities that sum to 1.
+        Formula: softmax(x_i) = exp(x_i) / sum(exp(x_j) for all j)
+
+        It has two nice properties:
+        1. All outputs are between 0 and 1
+        2. They sum to exactly 1.0 (valid probability distribution)
+
+        Higher input → higher probability, but the relationship is
+        exponential, so differences get amplified.
+
+    WHAT IS torch.multinomial?
+        Randomly samples an index from a probability distribution.
+        If probs = [0.7, 0.2, 0.1]:
+          - 70% chance of returning 0
+          - 20% chance of returning 1
+          - 10% chance of returning 2
+
+        This is what makes the output NON-DETERMINISTIC:
+        same input can produce different outputs each time.
+
+    PARAMETERS:
+        model (TinyLanguageModel): Trained model in eval mode
+        vocab_data (dict):         Vocabulary with char_to_idx, idx_to_char
+        seed_text (str):           Starting text to continue from
+        length (int):              Number of characters to generate
+        temperature (float):       Controls randomness:
+                                     0.3 = very safe/predictable
+                                     0.8 = slightly creative
+                                     1.0 = balanced (default)
+                                     1.5 = very creative
+                                     2.0 = wild/chaotic
+
+    RETURNS:
+        str: The seed text + generated characters
+
+    EXAMPLE:
+        >>> text = generate_text_with_temperature(model, vocab_data,
+        ...     seed_text="The", length=100, temperature=0.8)
+        >>> print(text)  # different each time!
+        The best time to plant a tree was twenty years ago...
+    """
+
+    # ---- Extract vocabulary mappings ----
+    char_to_idx = vocab_data['char_to_idx']
+    idx_to_char = vocab_data['idx_to_char']
+
+    # ---- Encode the seed text ----
+    input_indices = [char_to_idx[ch] for ch in seed_text]
+
+    # ---- Start building the generated text ----
+    generated_chars = list(seed_text)
+
+    # ---- Initialize hidden state ----
+    hidden = None
+
+    # ---- Generate with temperature sampling ----
+    with torch.no_grad():
+
+        for i in range(length):
+
+            # ---- Prepare input ----
+            input_tensor = torch.tensor(input_indices).unsqueeze(0)
+
+            # ---- Forward pass ----
+            logits, hidden = model(input_tensor, hidden)
+
+            # ---- Get the last position's predictions ----
+            next_logits = logits[0, -1, :]
+
+            # ============================================================
+            # THE KEY DIFFERENCE: Temperature scaling + sampling
+            # ============================================================
+
+            # ---- Step A: Divide logits by temperature ----
+            # This is where the magic happens.
+            #
+            # Low temperature (e.g., 0.3):
+            #   logits / 0.3 → BIGGER numbers → softmax makes winner
+            #   even more dominant → nearly greedy behavior
+            #
+            # High temperature (e.g., 2.0):
+            #   logits / 2.0 → SMALLER numbers → softmax makes
+            #   distribution more uniform → more random choices
+            #
+            # Temperature 1.0: no change (divide by 1 = identity)
+            scaled_logits = next_logits / temperature
+
+            # ---- Step B: Convert to probabilities with softmax ----
+            # F.softmax() converts raw scores to probabilities.
+            # dim=0 means "apply along the only dimension" (our 48 scores).
+            #
+            # After softmax, all 48 values:
+            #   - Are between 0 and 1
+            #   - Sum to exactly 1.0
+            #   - Higher logits → higher probabilities
+            probs = F.softmax(scaled_logits, dim=0)
+
+            # ---- Step C: Sample from the distribution ----
+            # Instead of argmax (always pick the highest), we SAMPLE.
+            # torch.multinomial(probs, 1) draws ONE sample from the
+            # probability distribution.
+            #
+            # If probs = [0.70, 0.20, 0.05, 0.03, 0.02]:
+            #   - 70% chance of sampling index 0
+            #   - 20% chance of sampling index 1
+            #   - etc.
+            #
+            # This is what makes temperature-based generation
+            # NON-DETERMINISTIC: you get different text each time!
+            next_idx = torch.multinomial(probs, num_samples=1).item()
+
+            # ---- Convert to character and append ----
+            next_char = idx_to_char[next_idx]
+            generated_chars.append(next_char)
+
+            # ---- Prepare for next iteration ----
+            input_indices = [next_idx]
+
+    return ''.join(generated_chars)
+
+
 def main():
     """
-    Main function — load trained model and generate text examples.
+    Main function — load trained model and demonstrate temperature effects.
 
     FLOW:
         1. Load model from outputs/model.pth
         2. Load vocabulary from outputs/vocab.pth
-        3. Generate text with several different seeds
-        4. Show the results
+        3. Show greedy generation (Step 12 recap)
+        4. Compare different temperatures with the SAME seed (Step 13)
+        5. Explain what temperature does
     """
 
     import os
@@ -341,7 +535,7 @@ def main():
     # SETUP
     # ==================================================================
     print("=" * 60)
-    print("STEP 12: TEXT GENERATION")
+    print("STEP 13: TEMPERATURE-CONTROLLED TEXT GENERATION")
     print("=" * 60)
     print()
 
@@ -371,56 +565,110 @@ def main():
     print()
 
     # ==================================================================
-    # GENERATE TEXT: Multiple examples with different seeds
+    # PART 1: GREEDY (recap from Step 12)
     # ==================================================================
-    # We try different seed texts to see how the model continues them.
-    # The seed gives the model a starting context — different seeds
-    # lead to different generated text.
+    # First, show greedy decoding as the baseline.
 
-    seeds = [
-        "The",
-        "Life",
-        "In the",
-        "Success",
-        "Be",
+    seed = "The"
+    print("=" * 60)
+    print(f'GREEDY DECODING (seed: "{seed}")')
+    print("=" * 60)
+    print("Always picks the highest-scoring character. Deterministic.")
+    print()
+
+    greedy_text = generate_text(model, vocab_data,
+                                 seed_text=seed, length=200)
+    print(greedy_text)
+    print()
+
+    # ==================================================================
+    # PART 2: TEMPERATURE COMPARISON
+    # ==================================================================
+    # Now demonstrate the same seed with different temperatures.
+    # This is the heart of Step 13 — seeing how temperature affects output.
+
+    temperatures = [
+        (0.3, "Very cautious — almost greedy, very predictable"),
+        (0.5, "Conservative — safe choices, close to training data"),
+        (0.8, "Slightly creative — mostly sensible with some surprises"),
+        (1.0, "Balanced — the model's natural confidence level"),
+        (1.5, "Creative — more variety, some unexpected word choices"),
+        (2.0, "Wild — lots of randomness, may produce nonsense"),
     ]
 
     print("=" * 60)
-    print("GENERATED TEXT (Greedy — always picks highest probability)")
+    print(f'TEMPERATURE COMPARISON (seed: "{seed}")')
     print("=" * 60)
+    print("Same seed, different temperatures. Watch how output changes!")
+    print()
 
-    for seed in seeds:
-        print(f'\n--- Seed: "{seed}" ---')
+    for temp, description in temperatures:
+        print(f"--- Temperature {temp} ({description}) ---")
 
-        # Generate 200 characters starting from this seed
-        generated = generate_text(model, vocab_data,
-                                   seed_text=seed, length=200)
+        generated = generate_text_with_temperature(
+            model, vocab_data,
+            seed_text=seed, length=200, temperature=temp
+        )
 
         print(generated)
         print()
 
     # ==================================================================
-    # EXPLAIN THE OUTPUT
+    # PART 3: MULTIPLE SEEDS WITH GOOD TEMPERATURE
+    # ==================================================================
+    # Show generation with different seeds at a practical temperature.
+
+    good_temp = 0.8
+    seeds = ["Life", "Success", "Be", "In the"]
+
+    print("=" * 60)
+    print(f"MULTIPLE SEEDS (temperature={good_temp})")
+    print("=" * 60)
+    print()
+
+    for s in seeds:
+        print(f'--- Seed: "{s}" ---')
+        generated = generate_text_with_temperature(
+            model, vocab_data,
+            seed_text=s, length=200, temperature=good_temp
+        )
+        print(generated)
+        print()
+
+    # ==================================================================
+    # EXPLAIN TEMPERATURE
     # ==================================================================
     print("=" * 60)
-    print("UNDERSTANDING THE OUTPUT")
+    print("UNDERSTANDING TEMPERATURE")
     print("=" * 60)
     print("""
-What you're seeing:
-  - The model generates text character by character
-  - It learned patterns from 99 inspirational quotes
-  - Greedy decoding always picks the most likely next character
-  - This can lead to repetitive output (same phrases over and over)
+Temperature controls RANDOMNESS in text generation:
 
-Why it might look repetitive:
-  - Greedy decoding always makes the same choice in the same context
-  - The model memorized common phrases from the training data
-  - With only 6,201 characters of training data, variety is limited
+  ┌──────────────┬──────────────────────────────────────────────┐
+  │ Temperature  │ Effect                                       │
+  ├──────────────┼──────────────────────────────────────────────┤
+  │ 0.3 (low)    │ Very predictable. Almost identical to greedy │
+  │ 0.5          │ Conservative. Sticks close to training data  │
+  │ 0.8          │ Slightly creative. Good practical default    │
+  │ 1.0          │ Balanced. Model's natural confidence         │
+  │ 1.5          │ Creative. Unexpected word choices            │
+  │ 2.0 (high)   │ Wild. Often produces nonsense                │
+  └──────────────┴──────────────────────────────────────────────┘
 
-In Step 13, we'll add TEMPERATURE to control randomness:
-  - Low temperature (0.5):  safe, predictable, closer to training data
-  - Medium temperature (1.0): balanced creativity
-  - High temperature (1.5):  wild, creative, sometimes nonsensical
+How it works:
+  1. Model outputs 48 scores (logits) — one per character
+  2. Divide ALL scores by temperature
+  3. Convert to probabilities with softmax
+  4. Randomly SAMPLE from the probabilities
+
+  Low temp → divide by small number → scores spread apart
+           → top choice becomes near-certain
+  High temp → divide by large number → scores compress together
+            → all characters become more equally likely
+
+This is the same "temperature" concept used in ChatGPT, Claude,
+and all other language models. It's a universal knob for controlling
+the creativity vs safety tradeoff.
 """)
 
 
