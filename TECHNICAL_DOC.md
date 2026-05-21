@@ -20,6 +20,7 @@
   - [Step 04 — Character Vocabulary](#step-04--character-vocabulary)
   - [Step 05 — Training Sequences](#step-05--training-sequences)
   - [Step 06 — DataLoader Batching](#step-06--dataloader-batching)
+  - [Step 07 — Neural Network Model](#step-07--neural-network-model)
 - [Glossary](#glossary)
 
 ---
@@ -576,6 +577,115 @@ target:  [29, 26,  1, 36, 35]     ← positions 1-5 (shifted by 1)
 
 ---
 
+#### `src/model.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Define the neural network that learns to predict the next character |
+| **Created in** | Step 07 |
+| **Run with** | `PYTHONPATH=src python src/model.py` |
+| **Input** | Batched character indices, shape `(batch_size, seq_length)` |
+| **Output** | Prediction scores, shape `(batch_size, seq_length, vocab_size)` |
+| **Imported by** | `train.py` (Step 09), `generate.py` (Step 12) |
+
+**Classes:**
+
+| Class | Parent | Description |
+|-------|--------|-------------|
+| `TinyLanguageModel` | `nn.Module` | Three-layer neural network: Embedding → RNN → Linear output |
+
+**TinyLanguageModel — Constructor parameters (hyperparameters):**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vocab_size` | `int` | (required) | Number of unique characters. Determines embedding table rows and output layer size. |
+| `embed_size` | `int` | `128` | Dimensions per character embedding vector. Larger = more expressive. |
+| `hidden_size` | `int` | `256` | RNN hidden state size. The model's "memory capacity". |
+| `num_layers` | `int` | `2` | Stacked RNN layers. Layer 1 learns simple patterns, layer 2 learns higher ones. |
+
+**TinyLanguageModel — Layers (created in `__init__`):**
+
+| Layer | PyTorch class | Shape | What it does |
+|-------|--------------|-------|-------------|
+| `self.embedding` | `nn.Embedding(48, 128)` | Lookup table `(48, 128)` | Converts character index → 128-number vector |
+| `self.rnn` | `nn.RNN(128, 256, 2)` | Multiple weight matrices | Processes sequence left-to-right, builds context |
+| `self.output_layer` | `nn.Linear(256, 48)` | Weight `(48, 256)` + bias `(48,)` | Converts context → 48 prediction scores |
+
+**TinyLanguageModel — Methods:**
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `forward(x, hidden=None)` | `x`: char indices `(batch, seq_len)`, `hidden`: optional RNN state | `(logits, hidden)`: scores `(batch, seq_len, 48)` + RNN state | Full forward pass through all 3 layers |
+
+**Standalone functions:**
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `demonstrate_model_creation(vocab_size)` | `int` | Creates model, prints architecture, counts parameters per layer |
+| `demonstrate_forward_pass(model, vocab_size)` | model, int | Passes fake data through model, shows shapes at each stage |
+| `main()` | None | Creates model with vocab_size=48, runs all demos |
+
+**Parameter count: 248,880 total**
+
+| Component | Parameters | Percentage |
+|-----------|-----------|-----------|
+| Embedding (48 × 128) | 6,144 | 2.5% |
+| RNN layer 0 | 98,816 | 39.7% |
+| RNN layer 1 | 131,584 | 52.8% |
+| Output layer (256 × 48 + 48) | 12,336 | 5.0% |
+| **Total** | **248,880** | **100%** |
+
+**Detailed Flow (forward pass):**
+
+```
+forward(x, hidden=None)
+  │
+  │   INPUT: x shape (batch_size, seq_length) = (16, 50)
+  │          Each value is an int 0-47 (character index)
+  │
+  ├── Step 1: self.embedding(x)
+  │   │  Looks up each int in the embedding table
+  │   │  19 → row 19 of table → [0.3, -0.7, ...(128 floats)]
+  │   │
+  │   │  INPUT:  (16, 50)        ← ints
+  │   └─ OUTPUT: (16, 50, 128)   ← float vectors
+  │
+  ├── Step 2: self.rnn(embedded, hidden)
+  │   │  Processes sequence left-to-right
+  │   │  Position 0: context = f(embed[0], initial_hidden)
+  │   │  Position 1: context = f(embed[1], hidden_from_pos_0)
+  │   │  Position 2: context = f(embed[2], hidden_from_pos_1)
+  │   │  ...each position knows about ALL previous positions
+  │   │
+  │   │  INPUT:  (16, 50, 128)   ← embedded vectors
+  │   └─ OUTPUT: (16, 50, 256)   ← context vectors
+  │              + hidden (2, 16, 256) ← final hidden state
+  │
+  ├── Step 3: self.output_layer(rnn_out)
+  │   │  Matrix multiply: context × weights + bias
+  │   │  Produces 48 scores per position
+  │   │
+  │   │  INPUT:  (16, 50, 256)   ← context
+  │   └─ OUTPUT: (16, 50, 48)    ← logits (prediction scores)
+  │
+  └── RETURN: (logits, hidden)
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Neural network** | A series of math layers that transform input into predictions. Weights are learned. | Our 3-layer model with 248,880 parameters |
+| **Embedding** | Converts a plain number into a rich vector of floats that captures meaning | `19` ('T') → `[0.3, -0.7, 0.1, ...]` (128 numbers) |
+| **RNN** | Recurrent Neural Network — processes sequences position by position, building up context | After seeing "The", hidden state encodes "I've seen 'The'" |
+| **Hidden state** | The RNN's "working memory" — a vector that carries context between positions | Shape: `(2, 16, 256)` — 2 layers, 16 examples, 256 numbers each |
+| **Logits** | Raw prediction scores before converting to probabilities. Highest score = best guess. | `[..., 8.5, ..., 2.1, ...]` — 'e' scored highest |
+| **Forward pass** | The computation path from input to output through all layers | Input (16,50) → Embed → RNN → Linear → Output (16,50,48) |
+| **Parameters/weights** | The learnable numbers inside the model. Training adjusts these. | 248,880 numbers that start random and become meaningful |
+| **Hyperparameters** | Settings YOU choose (embed_size, hidden_size). NOT learned by training. | embed_size=128, hidden_size=256, num_layers=2 |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -828,6 +938,58 @@ data/input.txt
 
 ---
 
+### Step 07 — Neural Network Model
+
+**What was built:** A `TinyLanguageModel` class — the actual neural network with 248,880 learnable parameters across three layers.
+
+**Why it matters:** This is the brain of the project. All previous steps prepared data; this step builds the thing that will actually learn. The model takes character numbers as input and outputs prediction scores for what the next character should be.
+
+```
+What changed:
+  + src/model.py   ← TinyLanguageModel class + architecture/forward-pass demos
+
+Run:
+  PYTHONPATH=src python src/model.py
+
+Expected output:
+  Model architecture with layer details, 248,880 parameter count,
+  forward pass with shape transformations (16,50) → (16,50,128) → (16,50,256) → (16,50,48)
+```
+
+**The three layers:**
+| Layer | What it does | Shape change |
+|---|---|---|
+| **Embedding** | Converts character numbers → rich float vectors | `(16, 50)` → `(16, 50, 128)` |
+| **RNN** | Processes sequence, builds up context from left to right | `(16, 50, 128)` → `(16, 50, 256)` |
+| **Output** | Produces 48 prediction scores (one per character) | `(16, 50, 256)` → `(16, 50, 48)` |
+
+**Key takeaway:** The model is just three matrix operations chained together, starting with random weights. It currently knows nothing — all 248,880 parameters are random noise. Training (Steps 08-11) will adjust these numbers until the model produces useful predictions.
+
+**The flow so far:**
+
+```
+data/input.txt
+       │
+       └──▶ dataset.py (Vocabulary + TextDataset + DataLoader)
+                │
+                └── DataLoader yields batches: input (16, 50), target (16, 50)
+                        │
+                        ▼
+                    model.py (TinyLanguageModel)
+                        │
+                        ├── Embedding:  (16, 50) → (16, 50, 128)
+                        ├── RNN:        (16, 50, 128) → (16, 50, 256)
+                        └── Linear:     (16, 50, 256) → (16, 50, 48)
+                                                              │
+                                                              ▼
+                                                  48 scores per position
+                                                  (one per character)
+                                                              │
+                                                  (compared to targets in Step 08)
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -855,7 +1017,15 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Sequence length** | How many characters per training example. Our model uses 50; real LLMs use 4096+. | Step 05 |
 | **PyTorch Dataset** | A class with `__len__` and `__getitem__` — the standard way to serve training data in PyTorch. | Step 05 |
 | **Input→target shift** | Target is the input shifted right by 1 char. Position 0: input='T', target='h'. | Step 05 |
-| **Embedding** | Converting a token number into a rich vector of floats that captures meaning. | Step 07 (upcoming) |
+| **Neural network** | A series of math layers that transform input into predictions. Weights are learned through training. | Step 07 |
+| **Embedding** | Converts a plain integer into a rich vector of floats. `19` ('T') → `[0.3, -0.7, ...]` (128 numbers). | Step 07 |
+| **RNN** | Recurrent Neural Network — processes sequences position by position, building up context as it goes. | Step 07 |
+| **Hidden state** | The RNN's "working memory" — carries context from earlier positions to later ones. | Step 07 |
+| **Logits** | Raw prediction scores before probabilities. Highest score = model's best guess for next character. | Step 07 |
+| **Forward pass** | The path data takes through all layers: input → embedding → RNN → output → prediction scores. | Step 07 |
+| **Parameters/weights** | The learnable numbers inside the model (248,880 in ours). Start random, become meaningful via training. | Step 07 |
+| **Hyperparameters** | Settings chosen before training (embed_size, hidden_size, etc.). NOT learned. | Step 07 |
+| **nn.Module** | PyTorch base class for all neural networks. Tracks parameters and provides save/load. | Step 07 |
 | **Loss** | A number that measures how wrong the model's predictions are. Lower = better. | Step 08 (upcoming) |
 | **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
 | **Batch** | A group of training examples processed together. Our batches hold 16 examples each. | Step 06 |
@@ -871,4 +1041,4 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 06.*
+> *This document is updated with each new step. Last updated: Step 07.*
