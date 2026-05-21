@@ -1,0 +1,14 @@
+# ============================================================
+# Python dependencies for SampleAi
+# ============================================================
+# Install these by running:  pip install -r requirements.txt
+# ============================================================
+
+# PyTorch — the AI/ML framework we use to build and train our model.
+# Think of it as the "engine" that does all the math behind the scenes.
+# Website: https://pytorch.org
+torch
+
+# Matplotlib — a library for creating charts and graphs.
+# We'll use it to plot how our model improves during training.
+matplotlib
