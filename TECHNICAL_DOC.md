@@ -27,6 +27,7 @@
   - [Step 11 — Loss Curve Visualization](#step-11--loss-curve-visualization)
   - [Step 12 — Text Generation](#step-12--text-generation)
   - [Step 13 — Temperature Control](#step-13--temperature-control)
+  - [Step 14 — Interactive Prompt Mode](#step-14--interactive-prompt-mode)
 - [Glossary](#glossary)
 
 ---
@@ -956,6 +957,77 @@ generate_text(model, vocab_data, seed_text="The", length=200)
 
 ---
 
+#### `src/interactive.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Chat-like interactive loop for text generation with live settings control |
+| **Created in** | Step 14 |
+| **Run with** | `PYTHONPATH=src python src/interactive.py` |
+| **Input** | `outputs/model.pth`, `outputs/vocab.pth`, user keyboard input |
+| **Output** | Generated text printed to console in a REPL-like loop |
+| **Imports** | `model.py`, `generate.py` (load_model, load_vocabulary, generate_text, generate_text_with_temperature) |
+
+**Classes:**
+
+| Class | Description |
+|-------|-------------|
+| `InteractiveGenerator` | Manages model, vocabulary, and settings (temperature, length). Runs the input loop. |
+
+**InteractiveGenerator — Methods:**
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `__init__(model, vocab_data, temperature, length)` | model, vocab_data, temperature (float, default=0.8), length (int, default=200) | None | Stores model, vocab, and default settings. |
+| `generate(seed_text)` | seed_text (str) | `str` | Generates text using current temperature. Switches to greedy if temp < 0.01. |
+| `handle_command(command)` | command (str) | `bool` | Processes `:` commands. Returns False for `:quit`, True to continue. |
+| `print_help()` | None | None | Prints available commands. |
+| `print_settings()` | None | None | Prints current temperature and length with description. |
+| `run()` | None | None | Main input loop: prompt → read → generate or handle command → repeat. |
+| `print_welcome()` | None | None | Prints the welcome banner with current settings. |
+
+**Available commands:**
+
+| Command | What it does | Example |
+|---------|-------------|---------|
+| `:temp <value>` | Change temperature (0.0-3.0) | `:temp 0.5` |
+| `:length <value>` | Change generation length (10-1000) | `:length 300` |
+| `:settings` | Show current temperature and length | `:settings` |
+| `:help` | Show available commands | `:help` |
+| `:quit` / `:exit` | Exit the program | `:quit` |
+
+**Detailed Flow:**
+
+```
+main()
+  │
+  ├── Load model + vocabulary (same as generate.py)
+  │
+  └── InteractiveGenerator(model, vocab_data, temp=0.8, length=200)
+        │
+        └── run()
+              │
+              ├── Print welcome banner
+              │
+              └── Loop:
+                    │
+                    ├── >> user types "The"
+                    │   └── generate("The") → print generated text
+                    │
+                    ├── >> user types ":temp 0.5"
+                    │   └── self.temperature = 0.5
+                    │
+                    ├── >> user types "Life is"
+                    │   └── generate("Life is") → print (now at temp 0.5)
+                    │
+                    ├── >> user types ":quit"
+                    │   └── break → exit
+                    │
+                    └── (catches Ctrl+C and Ctrl+D gracefully)
+```
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -1732,6 +1804,83 @@ outputs/model.pth + vocab.pth
 
 ---
 
+### Step 14 — Interactive Prompt Mode
+
+**What was built:** An `interactive.py` script with an `InteractiveGenerator` class that provides a chat-like REPL for text generation with live settings control.
+
+**Why it matters:** Previous steps required editing code to change seeds, temperature, or length. The interactive mode lets you experiment freely — type any seed, adjust temperature on the fly, and see results instantly. This is the "user interface" of your AI.
+
+```
+What changed:
+  + src/interactive.py  ← InteractiveGenerator class + main()
+
+Run:
+  PYTHONPATH=src python src/interactive.py
+
+Expected output:
+  Welcome banner, then a >> prompt.
+  Type text → see generated continuation.
+  Type :temp 0.5 → change temperature.
+  Type :quit → exit.
+```
+
+**Example session:**
+
+```
+>> The
+The only impossible journey is the one you never betarn
+domething ready made. It comes from your own...
+
+>> :temp 0.5
+  Temperature set to 0.5
+
+>> Life is
+Life is what happens when you are busy making others
+happy too. The purpose of our lives is to be happy...
+
+>> :quit
+  Goodbye! Happy generating.
+```
+
+**Key takeaway:** The interactive mode is the final user-facing layer. It sits on top of the entire pipeline: data → model → training → generation → temperature → interactive prompt. This is how real AI products are structured — a simple interface hiding layers of complexity.
+
+**The complete project architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    USER INTERFACE (Step 14)                   │
+│                                                               │
+│  interactive.py                                               │
+│    >> "The"                                                   │
+│    → "The only way to do great work..."                       │
+│    >> :temp 0.5                                               │
+│    >> :quit                                                   │
+│                                                               │
+├─────────────────────────────────────────────────────────────┤
+│                   GENERATION (Steps 12-13)                    │
+│                                                               │
+│  generate.py                                                  │
+│    generate_text()                    ← greedy decoding       │
+│    generate_text_with_temperature()   ← temperature sampling  │
+│                                                               │
+├─────────────────────────────────────────────────────────────┤
+│                   TRAINED MODEL (Steps 07-10)                 │
+│                                                               │
+│  model.py → TinyLanguageModel (248,880 parameters)           │
+│  train.py → 100 epochs of training                           │
+│  outputs/model.pth + vocab.pth                               │
+│                                                               │
+├─────────────────────────────────────────────────────────────┤
+│                   DATA PIPELINE (Steps 03-06)                 │
+│                                                               │
+│  data/input.txt → vocabulary.py → dataset.py → DataLoader    │
+│  6201 chars → 48 vocab → 124 examples → 7 batches of 16     │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1806,8 +1955,10 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Softmax** | Converts raw scores (logits) into probabilities summing to 1.0. `softmax(x_i) = exp(x_i) / sum(exp(x_j))`. | Step 13 |
 | **Sampling** | Randomly picking from a probability distribution instead of always choosing the maximum. Makes output non-deterministic. | Step 13 |
 | **torch.multinomial** | Draws random samples from a probability distribution. The core of temperature-based generation. | Step 13 |
+| **REPL** | Read-Eval-Print Loop — an interactive prompt where you type input, see output, repeat. The `>>` prompt in interactive.py. | Step 14 |
+| **Input validation** | Checking user input for errors before processing. interactive.py verifies all characters exist in the vocabulary. | Step 14 |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 13.*
+> *This document is updated with each new step. Last updated: Step 14.*
