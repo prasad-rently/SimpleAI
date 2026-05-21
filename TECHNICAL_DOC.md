@@ -24,6 +24,7 @@
   - [Step 08 — Loss Function and Optimizer](#step-08--loss-function-and-optimizer)
   - [Step 09 — Single Epoch Training](#step-09--single-epoch-training)
   - [Step 10 — Full Training and Model Saving](#step-10--full-training-and-model-saving)
+  - [Step 11 — Loss Curve Visualization](#step-11--loss-curve-visualization)
 - [Glossary](#glossary)
 
 ---
@@ -828,6 +829,61 @@ outputs/
 
 ---
 
+#### `src/plot_loss.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Visualize the training loss curve as a PNG chart |
+| **Created in** | Step 11 |
+| **Run with** | `PYTHONPATH=src python src/plot_loss.py` |
+| **Input** | `outputs/loss_history.pth` (list of 100 floats from Step 10) |
+| **Output** | `outputs/loss_plot.png` (chart image, ~59 KB) |
+| **Imports** | `torch`, `matplotlib` |
+
+**Functions:**
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `plot_training_loss(loss_history, save_path)` | loss_history (list[float]), save_path (str, default="outputs/loss_plot.png") | None | Creates a matplotlib line chart with loss curve, random baseline reference line, start/end annotations, and saves as PNG at 150 DPI. |
+| `print_loss_summary(loss_history)` | loss_history (list[float]) | None | Prints text-based summary: first/final/best loss, milestone values at 25%/50%/75%, improvement percentage. |
+| `main()` | None | None | Loads loss_history.pth, prints summary, creates and saves the plot. |
+
+**Detailed Flow:**
+
+```
+main()
+  │
+  ├── torch.load("outputs/loss_history.pth")
+  │     └── [2.9979, 2.7113, ..., 0.0434]  (100 floats)
+  │
+  ├── print_loss_summary()
+  │     ├── First loss:  2.9979  (epoch 0)
+  │     ├── Final loss:  0.0434  (epoch 99)
+  │     ├── Best loss:   0.0434  (epoch 99)
+  │     └── Improvement: 98.6% reduction
+  │
+  └── plot_training_loss()
+        │
+        ├── plt.figure(figsize=(10, 6))           ← blank canvas
+        ├── plt.plot(epochs, loss_history)          ← blue loss line
+        ├── plt.axhline(y=3.87, linestyle='--')    ← red dashed baseline
+        ├── plt.annotate("Start: 3.00", ...)       ← start label
+        ├── plt.annotate("Final: 0.04", ...)       ← end label
+        ├── plt.xlabel, ylabel, title, legend, grid ← styling
+        └── plt.savefig("outputs/loss_plot.png")   ← save to disk (59 KB)
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Loss curve** | A chart of loss vs epochs. THE key diagnostic tool in ML — shows if training is working. | Sharp drop then plateau = healthy training |
+| **matplotlib** | Python's standard charting library. Creates charts from data arrays. | `plt.plot(x, y)` draws a line |
+| **Agg backend** | Non-interactive rendering engine for matplotlib. Writes directly to image files without needing a display window. | `matplotlib.use('Agg')` |
+| **DPI** | Dots per inch — controls image resolution. 150 DPI = 1500×900 pixels for a 10×6 inch figure. | `plt.savefig(..., dpi=150)` |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -1374,6 +1430,72 @@ LOADING (in Step 12 — generation):
 
 ---
 
+### Step 11 — Loss Curve Visualization
+
+**What was built:** A `plot_loss.py` script that loads the loss history from training and creates a professional loss curve chart.
+
+**Why it matters:** The loss curve is the single most important diagnostic tool in machine learning. Just looking at the numbers tells you "loss went down", but the SHAPE of the curve tells you much more — how fast the model learned, when it converged, whether there were issues. Visualization makes patterns obvious that numbers alone can hide.
+
+```
+What changed:
+  + src/plot_loss.py      ← loss curve plotting script
+
+Run:
+  PYTHONPATH=src python src/plot_loss.py
+
+Expected output:
+  Loss Summary (text): first 2.9979, final 0.0434, 98.6% reduction
+  Loss plot saved to outputs/loss_plot.png (58.8 KB)
+
+Generated files:
+  outputs/loss_plot.png  ← the training loss curve chart
+```
+
+**Key takeaway:** The curve shows a classic healthy training pattern — sharp initial drop (epochs 0-30) as the model learns common patterns, then a gradual plateau (epochs 30-100) as it fine-tunes. The entire curve stays well below the random baseline (3.87), confirming the model learned successfully.
+
+**Reading the loss curve:**
+
+```
+  What the shape tells you:
+  ─────────────────────────────────────────────────────
+  Sharp drop (epochs 0-10):
+    → Model learned the easiest patterns first
+      (common chars like space, 'e', 't')
+
+  Gradual decline (epochs 10-30):
+    → Learning more complex patterns
+      (common words like "the", "is", "to")
+
+  Flat plateau (epochs 30-100):
+    → Model has converged — learned most of what it can
+      from this data. Further training gives tiny gains.
+
+  Random baseline (dashed red line at 3.87):
+    → Where an untrained model would be.
+      Everything below this line = actual learning.
+```
+
+**The flow so far:**
+
+```
+outputs/loss_history.pth   ← saved by train.py (Step 10)
+       │
+       └──▶ plot_loss.py   ← NEW: loads and visualizes
+               │
+               ├── print_loss_summary()
+               │     └── Text stats: first/final/best loss, milestones
+               │
+               └── plot_training_loss()
+                     │
+                     ├── matplotlib creates figure
+                     ├── Plots loss curve (blue line)
+                     ├── Adds random baseline (red dashed)
+                     ├── Adds annotations (start/end labels)
+                     └── Saves → outputs/loss_plot.png (59 KB)
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1434,10 +1556,14 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **torch.save()** | Serializes Python objects (tensors, dicts) to a binary file on disk. Convention: `.pth` extension. | Step 10 |
 | **Convergence** | When loss stops decreasing — the model has learned what it can from the data with its current capacity. | Step 10 |
 | **Serialization** | Converting in-memory objects (like tensors) to bytes that can be written to disk and loaded later. | Step 10 |
+| **Loss curve** | A chart plotting loss vs epoch. The key diagnostic: shape reveals learning speed, convergence, and problems. | Step 11 |
+| **matplotlib** | Python's standard charting/plotting library. `plt.plot(x, y)` draws a line chart. Used by scientists and engineers worldwide. | Step 11 |
+| **Agg backend** | Non-interactive matplotlib renderer. Writes charts directly to image files without needing a GUI window. | Step 11 |
+| **Plateau** | When the loss curve flattens — the model has converged and further training yields diminishing returns. | Step 11 |
 | **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
 | **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 10.*
+> *This document is updated with each new step. Last updated: Step 11.*
