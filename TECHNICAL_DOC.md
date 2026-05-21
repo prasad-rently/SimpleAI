@@ -21,6 +21,7 @@
   - [Step 05 — Training Sequences](#step-05--training-sequences)
   - [Step 06 — DataLoader Batching](#step-06--dataloader-batching)
   - [Step 07 — Neural Network Model](#step-07--neural-network-model)
+  - [Step 08 — Loss Function and Optimizer](#step-08--loss-function-and-optimizer)
 - [Glossary](#glossary)
 
 ---
@@ -686,6 +687,53 @@ forward(x, hidden=None)
 
 ---
 
+#### `src/training_setup.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Demonstrate the loss function and optimizer — how the model learns from mistakes |
+| **Created in** | Step 08 |
+| **Run with** | `PYTHONPATH=src python src/training_setup.py` |
+| **Input** | Creates model internally, uses fake data for demos |
+| **Output** | Loss computation demo, optimizer explanation, one full learning step with before/after |
+
+**Standalone functions:**
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `demonstrate_loss_function(model, vocab_size)` | model, int | Shows CrossEntropyLoss: forward pass → reshape → loss value → interpretation vs random baseline |
+| `demonstrate_optimizer(model)` | model | Creates Adam optimizer, explains learning rate and what Adam does per step |
+| `demonstrate_one_learning_step(model, loss_fn, optimizer, vocab_size)` | all components | Runs the complete 5-step cycle: forward → loss → backward → step → zero_grad. Shows weights before/after. |
+| `main()` | None | Creates model, runs all three demos |
+
+**The 5-line training cycle (the core of ALL neural network training):**
+
+```python
+logits, _ = model(input)                    # 1. Forward pass
+loss = loss_fn(logits.view(-1, 48), target.view(-1))  # 2. Compute loss
+loss.backward()                             # 3. Compute gradients
+optimizer.step()                            # 4. Update weights
+optimizer.zero_grad()                       # 5. Clear gradients
+```
+
+**Key components:**
+
+| Component | PyTorch class | What it does |
+|-----------|--------------|-------------|
+| Loss function | `nn.CrossEntropyLoss()` | Measures how wrong predictions are. Returns single number (lower = better). Random baseline ≈ 3.87 for 48 chars. |
+| Optimizer | `torch.optim.Adam(lr=0.001)` | Reads gradients, adjusts all 248,880 weights to reduce loss. Adaptive learning rate per parameter. |
+
+**Loss scale reference:**
+
+| Loss value | What it means |
+|-----------|--------------|
+| ~3.87 | Random guessing (untrained model). Expected: -log(1/48). |
+| ~2.0 | Model has learned common patterns |
+| ~1.0 | Model has learned well |
+| → 0.0 | Memorized training data (overfitting) |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -990,6 +1038,53 @@ data/input.txt
 
 ---
 
+### Step 08 — Loss Function and Optimizer
+
+**What was built:** Demos of CrossEntropyLoss and Adam optimizer, plus a complete one-step learning cycle showing weights changing.
+
+**Why it matters:** The model has 248,880 random parameters. To make them useful, we need a way to measure mistakes (loss function) and fix them (optimizer). These two components plus the model form the complete learning system.
+
+```
+What changed:
+  + src/training_setup.py   ← loss function, optimizer, and one-step learning demos
+
+Run:
+  PYTHONPATH=src python src/training_setup.py
+
+Expected output:
+  Loss ≈ 3.87 (random baseline), optimizer config, one learning step
+  with before/after weights, loss improvement proof
+```
+
+**Key takeaway:** ALL neural network training is just 5 lines repeated thousands of times: forward pass → compute loss → backward pass → optimizer step → zero gradients. That's it. The rest is infrastructure.
+
+**The learning loop:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│   DataLoader ──▶ model(input) ──▶ loss_fn(logits, target)      │
+│       │              │                    │                     │
+│       │         (predictions)         (one number:              │
+│       │                                how wrong)               │
+│       │                                   │                     │
+│       │                            loss.backward()              │
+│       │                           (compute gradients)           │
+│       │                                   │                     │
+│       │                           optimizer.step()              │
+│       │                          (adjust weights)               │
+│       │                                   │                     │
+│       │                         optimizer.zero_grad()           │
+│       │                          (clear for next)               │
+│       │                                   │                     │
+│       └────────── next batch ◀────────────┘                     │
+│                                                                 │
+│   After many iterations: loss decreases, model improves         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1026,19 +1121,23 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Parameters/weights** | The learnable numbers inside the model (248,880 in ours). Start random, become meaningful via training. | Step 07 |
 | **Hyperparameters** | Settings chosen before training (embed_size, hidden_size, etc.). NOT learned. | Step 07 |
 | **nn.Module** | PyTorch base class for all neural networks. Tracks parameters and provides save/load. | Step 07 |
-| **Loss** | A number that measures how wrong the model's predictions are. Lower = better. | Step 08 (upcoming) |
+| **Loss** | A number measuring how wrong the model is. Random baseline ≈ 3.87. Good training → ~1.0. | Step 08 |
+| **CrossEntropyLoss** | Loss function for classification. Converts logits to probabilities, scores the correct answer. | Step 08 |
 | **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
 | **Batch** | A group of training examples processed together. Our batches hold 16 examples each. | Step 06 |
 | **Batch size** | Number of examples per batch. 16 for us. Larger = faster but more memory. Common: 8-128. | Step 06 |
 | **DataLoader** | PyTorch utility that wraps a Dataset to provide batching, shuffling, and iteration. | Step 06 |
 | **Shuffling** | Randomizing the order of examples each epoch. Prevents memorizing the order. | Step 06 |
 | **drop_last** | DataLoader option to discard the last incomplete batch. Keeps all batches same size. | Step 06 |
-| **Gradient** | The direction and amount to adjust each weight to reduce the loss. | Step 08 (upcoming) |
-| **Optimizer** | The algorithm that uses gradients to update the model's weights. | Step 08 (upcoming) |
+| **Gradient** | For each weight: "if I increase this, how does the loss change?" Computed by `loss.backward()`. | Step 08 |
+| **Backpropagation** | The algorithm that computes gradients for all weights by tracing back from the loss. The key algorithm in deep learning. | Step 08 |
+| **Optimizer** | Algorithm that uses gradients to adjust weights. Adam is the most popular — adaptive learning rate per weight. | Step 08 |
+| **Learning rate** | How big each weight adjustment is. lr=0.001 is a common default for Adam. Too high → unstable, too low → slow. | Step 08 |
+| **zero_grad()** | Clears accumulated gradients before the next step. Forgetting this is a common PyTorch bug. | Step 08 |
 | **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
 | **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 07.*
+> *This document is updated with each new step. Last updated: Step 08.*
