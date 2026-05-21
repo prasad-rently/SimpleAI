@@ -1,4 +1,4 @@
-# SampleAi
+# SimpleAI
 
 A tiny character-level text generator built from scratch to learn how AI models work.
 
@@ -14,7 +14,7 @@ It's the same core idea behind ChatGPT and Claude — just massively scaled down
 ## Project structure
 
 ```
-SampleAi/
+SimpleAI/
 ├── data/           <- Training text goes here
 ├── src/            <- All Python source code
 ├── outputs/        <- Trained models and charts (generated, not committed)

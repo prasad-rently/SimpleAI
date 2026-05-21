@@ -1,5 +1,5 @@
 # ============================================================
-# Python dependencies for SampleAi
+# Python dependencies for SimpleAI
 # ============================================================
 # Install these by running:  pip install -r requirements.txt
 # ============================================================

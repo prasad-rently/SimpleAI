@@ -185,7 +185,7 @@ Each step below is a separate branch and PR, so you can review exactly what chan
 ## Project Structure (What We'll Build)
 
 ```
-SampleAi/
+SimpleAI/
 ├── REQUIREMENTS.md          # This file
 ├── data/
 │   └── input.txt            # Training text data
