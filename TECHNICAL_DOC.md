@@ -19,6 +19,7 @@
   - [Step 03 — Training Data](#step-03--training-data)
   - [Step 04 — Character Vocabulary](#step-04--character-vocabulary)
   - [Step 05 — Training Sequences](#step-05--training-sequences)
+  - [Step 06 — DataLoader Batching](#step-06--dataloader-batching)
 - [Glossary](#glossary)
 
 ---
@@ -500,9 +501,13 @@ main()
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
+| `create_dataloader(dataset, batch_size, shuffle)` | dataset (TextDataset), batch_size (int, default=16), shuffle (bool, default=True) | Wraps dataset in a PyTorch DataLoader for batched, shuffled iteration. Returns `DataLoader`. |
 | `demonstrate_training_pairs(dataset, vocab, num_examples)` | dataset, vocab, count | Shows training pairs as both text and numbers with position-by-position breakdown |
 | `demonstrate_data_shapes(dataset)` | dataset | Shows tensor shapes, dtypes, and verifies the input→target shift |
-| `main()` | None | Loads text, builds vocab, creates dataset, runs all demos |
+| `demonstrate_batching(dataloader, vocab, dataset)` | dataloader, vocab, dataset | Shows batch shapes, shape transformation, and how to index into batches |
+| `demonstrate_shuffling(dataset, vocab)` | dataset, vocab | Compares shuffled vs unshuffled DataLoaders to show randomization |
+| `demonstrate_full_epoch(dataloader)` | dataloader | Iterates through ALL batches, shows what one epoch looks like |
+| `main()` | None | Loads text, builds vocab, creates dataset + dataloader, runs all demos |
 
 **Detailed Flow:**
 
@@ -754,6 +759,75 @@ data/input.txt
 
 ---
 
+### Step 06 — DataLoader Batching
+
+**What was built:** A `create_dataloader()` function and demos showing batching, shuffling, and epoch iteration.
+
+**Why it matters:** Processing examples one at a time is slow. DataLoader groups them into batches of 16, which is dramatically faster because CPUs/GPUs can do math on many examples simultaneously. Shuffling the order each epoch prevents the model from memorizing the sequence of examples.
+
+```
+What changed:
+  ~ src/dataset.py   ← added create_dataloader(), batching/shuffling/epoch demos
+
+Run:
+  PYTHONPATH=src python src/dataset.py
+
+Expected output:
+  Training pairs, batch shapes (16, 50), shuffle comparison,
+  full epoch walkthrough (7 batches × 16 examples = 112 per epoch)
+```
+
+**Key numbers:**
+- **124 examples** in the dataset
+- **Batch size 16** → 7 complete batches per epoch (112 examples used, 12 dropped)
+- **Shape goes from (50,) to (16, 50)** — the new first dimension is the batch
+
+**Key takeaway:** The DataLoader is the last piece of the data pipeline. After this step, data flows from text file → vocabulary → dataset → dataloader → ready for the model. Step 07 builds the model itself.
+
+**The flow so far:**
+
+```
+data/input.txt
+       │
+       └──(read by)──▶ dataset.py
+                          │
+                          ├── Vocabulary (from vocabulary.py)
+                          │     .encode("The") → [19, 29, 26]
+                          │
+                          ├── TextDataset
+                          │     .data = tensor([19, 29, 26, ...]) (6201 ints)
+                          │     dataset[0] → (input shape (50,), target shape (50,))
+                          │     124 total examples
+                          │
+                          └── create_dataloader(dataset, batch_size=16, shuffle=True)
+                                │
+                                └── DataLoader
+                                      Yields batches of shape (16, 50)
+                                      7 batches per epoch
+                                      Shuffled each epoch
+                                      │
+                                      └── (fed to model in Step 07+)
+```
+
+**The shape journey so far:**
+
+```
+  Raw text         "The only way to do..."     (6201 characters)
+       │
+       ▼ encode()
+  1D tensor        [19, 29, 26, 1, 36, ...]    shape: (6201,)
+       │
+       ▼ TextDataset.__getitem__()
+  Training pair    input (50,), target (50,)    124 pairs total
+       │
+       ▼ DataLoader batching
+  Batch            input (16, 50), target (16, 50)    7 batches/epoch
+                          ↑    ↑
+                    batch_dim  seq_dim
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -784,7 +858,11 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Embedding** | Converting a token number into a rich vector of floats that captures meaning. | Step 07 (upcoming) |
 | **Loss** | A number that measures how wrong the model's predictions are. Lower = better. | Step 08 (upcoming) |
 | **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
-| **Batch** | A small group of training examples processed together. More efficient than one at a time. | Step 06 (upcoming) |
+| **Batch** | A group of training examples processed together. Our batches hold 16 examples each. | Step 06 |
+| **Batch size** | Number of examples per batch. 16 for us. Larger = faster but more memory. Common: 8-128. | Step 06 |
+| **DataLoader** | PyTorch utility that wraps a Dataset to provide batching, shuffling, and iteration. | Step 06 |
+| **Shuffling** | Randomizing the order of examples each epoch. Prevents memorizing the order. | Step 06 |
+| **drop_last** | DataLoader option to discard the last incomplete batch. Keeps all batches same size. | Step 06 |
 | **Gradient** | The direction and amount to adjust each weight to reduce the loss. | Step 08 (upcoming) |
 | **Optimizer** | The algorithm that uses gradients to update the model's weights. | Step 08 (upcoming) |
 | **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
@@ -793,4 +871,4 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 05.*
+> *This document is updated with each new step. Last updated: Step 06.*
