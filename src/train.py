@@ -1,58 +1,51 @@
 """
-train.py — Train the model on real data for one epoch.
+train.py — Train the model for multiple epochs and save the result.
 
 PURPOSE:
-    This is where ALL previous steps come together for the first time:
-    - Step 03: Training data (data/input.txt)
-    - Step 04: Vocabulary (text ↔ numbers)
-    - Step 05: Dataset (training pairs)
-    - Step 06: DataLoader (batched data)
-    - Step 07: Model (neural network)
-    - Step 08: Loss function + Optimizer
+    This file handles the COMPLETE training process:
+    - Step 09: train_one_epoch() — runs one pass through all batches
+    - Step 10: train() — runs MANY epochs, tracks loss history, saves model
 
-    We wire them all up and run one EPOCH — one complete pass through
-    every batch of training data. After this, the model will have
-    updated its weights 7 times (once per batch) and should show
-    measurable improvement.
+    After training, we save two things:
+    1. The trained model weights → outputs/model.pth
+    2. The vocabulary            → outputs/vocab.pth
+    Both are needed later for text generation (Step 12).
 
-WHAT IS AN EPOCH?
-    One epoch = processing EVERY training example exactly once.
-    With our DataLoader:
-      - 124 examples total
-      - Batch size 16
-      - 7 complete batches per epoch (112 examples, 12 dropped)
-      - The model's weights update 7 times during one epoch
+WHAT HAPPENS OVER MANY EPOCHS:
+    Epoch  0: loss ≈ 3.90 (random — model knows nothing)
+    Epoch 10: loss ≈ 2.50 (learning common characters like 'e', ' ')
+    Epoch 30: loss ≈ 1.80 (learning common words like "the", "is")
+    Epoch 50: loss ≈ 1.50 (learning phrase patterns)
+    Epoch 80: loss ≈ 1.20 (generating recognizable text)
 
-    Training typically runs for many epochs (e.g., 50-200).
-    More epochs = more chances to learn patterns, but too many
-    can lead to overfitting (memorizing instead of learning).
+    The loss CURVE shows this improvement visually (Step 11).
 
-THE TRAINING FLOW:
-    ┌──────────────────────────────────────────────────────────┐
-    │  for each batch in DataLoader:                           │
-    │    1. inputs, targets = batch          (get data)        │
-    │    2. logits, _ = model(inputs)        (forward pass)    │
-    │    3. loss = loss_fn(logits, targets)  (measure error)   │
-    │    4. loss.backward()                  (compute grads)   │
-    │    5. optimizer.step()                 (update weights)  │
-    │    6. optimizer.zero_grad()            (clear grads)     │
-    │    7. print loss                       (monitor)         │
-    │                                                          │
-    │  → After all batches: report average loss for the epoch  │
-    └──────────────────────────────────────────────────────────┘
+WHY SAVE THE MODEL?
+    Training takes time (minutes for us, days for GPT-4).
+    Once trained, we save the weights to disk so we can:
+    - Generate text without retraining (Step 12)
+    - Share the model with others
+    - Resume training later if needed
+
+    We save with torch.save(), which serializes (converts to bytes)
+    the model's state_dict — a dictionary of all 248,880 learned weights.
 
 WHAT THIS FILE PROVIDES:
-    1. train_one_epoch() — the core training function
-    2. Full pipeline: load data → build vocab → create dataset →
-       create dataloader → create model → train one epoch
+    1. train_one_epoch()  — train for one epoch (from Step 09)
+    2. train()            — train for many epochs, return loss history
+    3. save_model()       — save trained model to disk
+    4. save_vocabulary()  — save vocabulary for generation
+    5. main()             — full pipeline: setup → train → save
 
 INPUT:  data/input.txt
-OUTPUT: Printed loss per batch and epoch summary
+OUTPUT: outputs/model.pth, outputs/vocab.pth, printed loss per epoch
 
 Usage:
-    python src/train.py
+    PYTHONPATH=src python src/train.py
 """
 
+import os
+import math
 import torch
 import torch.nn as nn
 
@@ -204,11 +197,6 @@ def train_one_epoch(model, dataloader, loss_fn, optimizer, vocab_size, epoch_num
         total_loss += batch_loss
         num_batches += 1
 
-        # Print every batch so you can watch the loss change in real-time.
-        # In larger projects you'd print less frequently to avoid spam.
-        print(f"  Epoch {epoch_num:3d} | Batch {batch_idx}/{len(dataloader)-1} | "
-              f"Loss: {batch_loss:.4f}")
-
     # ---- Compute average loss for the epoch ----
     # Average = total / count. This smooths out batch-to-batch noise
     # and gives a single number representing the epoch's performance.
@@ -217,9 +205,241 @@ def train_one_epoch(model, dataloader, loss_fn, optimizer, vocab_size, epoch_num
     return avg_loss
 
 
+def train(model, dataloader, loss_fn, optimizer, vocab_size, num_epochs=50,
+          print_every=5):
+    """
+    Train the model for multiple epochs, tracking loss over time.
+
+    This is the OUTER training loop. It calls train_one_epoch() repeatedly,
+    building up a list of loss values — the "loss history". This history
+    is what gets plotted as the training curve (Step 11).
+
+    HOW MULTI-EPOCH TRAINING WORKS:
+        Each epoch is a FULL pass through the data (7 batches).
+        With 50 epochs, the model sees every example 50 times.
+        That's 50 × 7 = 350 total weight updates.
+
+        Why see the same data multiple times?
+        - First pass:  model learns the most obvious patterns
+        - Later passes: model refines and picks up subtler patterns
+        - Like re-reading a textbook — each pass reveals more detail
+
+        The DataLoader SHUFFLES examples each epoch, so the model
+        sees them in a different order every time. This prevents it
+        from memorizing the order of examples.
+
+    WHAT IS "LOSS HISTORY"?
+        A list of average loss values, one per epoch:
+          [3.33, 2.91, 2.65, 2.48, ...]
+
+        This list has two important uses:
+        1. We can SEE if the model is improving (loss going down)
+        2. We can PLOT it as a chart (Step 11) to visualize training
+
+        If loss stops decreasing, the model has learned what it can
+        (or we need to change hyperparameters).
+
+    WHAT IS print_every?
+        Controls how often we print progress. With 50 epochs:
+        - print_every=1:  50 lines of output (noisy)
+        - print_every=5:  10 lines of output (cleaner)
+        - print_every=10: 5 lines of output (compact)
+
+        We always print the first epoch (0) and the last epoch
+        so you can see the start and end.
+
+    PARAMETERS:
+        model (TinyLanguageModel):   The model to train
+        dataloader (DataLoader):     Batched training data
+        loss_fn (CrossEntropyLoss):  Measures prediction errors
+        optimizer (Adam):            Updates weights using gradients
+        vocab_size (int):            Number of characters (for reshaping)
+        num_epochs (int):            How many times to pass through all data
+        print_every (int):           Print progress every N epochs
+
+    RETURNS:
+        list[float]: Loss history — one average loss value per epoch.
+                     Used for plotting the training curve (Step 11).
+
+    EXAMPLE:
+        >>> loss_history = train(model, dataloader, loss_fn, optimizer, 48,
+        ...                      num_epochs=50, print_every=10)
+        Epoch   0/50 | Loss: 3.3251
+        Epoch  10/50 | Loss: 2.1534
+        Epoch  20/50 | Loss: 1.7821
+        ...
+        >>> len(loss_history)
+        50
+    """
+
+    # ---- Store loss for every epoch ----
+    # This list will have num_epochs entries when training finishes.
+    # Each entry is the average loss for that epoch.
+    # Example after 50 epochs: [3.33, 2.91, 2.65, 2.48, 2.35, ...]
+    loss_history = []
+
+    # ---- Train for each epoch ----
+    # range(num_epochs) gives [0, 1, 2, ..., num_epochs-1]
+    # Each iteration = one complete pass through the training data.
+    for epoch in range(num_epochs):
+
+        # Run one epoch and get its average loss
+        # This calls train_one_epoch() which loops through all 7 batches
+        avg_loss = train_one_epoch(
+            model, dataloader, loss_fn, optimizer,
+            vocab_size, epoch_num=epoch
+        )
+
+        # ---- Record the loss ----
+        # Append to our history list so we can plot it later.
+        # loss_history[0] = epoch 0's average loss
+        # loss_history[1] = epoch 1's average loss
+        # etc.
+        loss_history.append(avg_loss)
+
+        # ---- Print progress at intervals ----
+        # We print on:
+        #   - The first epoch (epoch == 0) → see starting loss
+        #   - Every print_every epochs     → see progress
+        #   - The last epoch               → see final loss
+        #
+        # The % operator (modulo) gives the remainder after division.
+        # epoch % 5 == 0 is True for epochs 0, 5, 10, 15, 20, ...
+        is_first = (epoch == 0)
+        is_interval = (epoch % print_every == 0)
+        is_last = (epoch == num_epochs - 1)
+
+        if is_first or is_interval or is_last:
+            print(f"  Epoch {epoch:3d}/{num_epochs} | Avg Loss: {avg_loss:.4f}")
+
+    return loss_history
+
+
+def save_model(model, filepath="outputs/model.pth"):
+    """
+    Save the trained model's weights to a file on disk.
+
+    WHY SAVE THE MODEL?
+        Training takes time. Once the model has learned useful patterns,
+        we save those patterns (the weights) to a file. Later, we can
+        load the weights into a fresh model and skip all the training.
+
+        This is how AI models are distributed:
+        - OpenAI trains GPT for months → saves weights
+        - You download the weights → load into the same architecture
+        - Now you have a trained model without training it yourself
+
+    WHAT IS state_dict()?
+        A Python dictionary containing ALL learnable parameters:
+        {
+            'embedding.weight':    tensor of shape (48, 128),
+            'rnn.weight_ih_l0':    tensor of shape (256, 128),
+            'rnn.weight_hh_l0':    tensor of shape (256, 256),
+            'rnn.bias_ih_l0':      tensor of shape (256,),
+            'rnn.bias_hh_l0':      tensor of shape (256,),
+            'rnn.weight_ih_l1':    tensor of shape (256, 256),
+            'rnn.weight_hh_l1':    tensor of shape (256, 256),
+            'rnn.bias_ih_l1':      tensor of shape (256,),
+            'rnn.bias_hh_l1':      tensor of shape (256,),
+            'output_layer.weight': tensor of shape (48, 256),
+            'output_layer.bias':   tensor of shape (48,),
+        }
+
+        That's 248,880 numbers total — the model's entire "knowledge"
+        compressed into a single file (usually ~1-2 MB).
+
+    WHAT IS torch.save()?
+        Python's pickle + some PyTorch optimizations.
+        Converts the dictionary of tensors into bytes and writes to disk.
+        The .pth extension is the convention for PyTorch model files
+        (short for "PyTorch").
+
+    PARAMETERS:
+        model (TinyLanguageModel): The trained model to save
+        filepath (str):            Where to save (default: outputs/model.pth)
+
+    RETURNS:
+        None (writes file to disk)
+    """
+
+    # ---- Ensure the output directory exists ----
+    # os.path.dirname("outputs/model.pth") → "outputs"
+    # os.makedirs creates it if it doesn't exist.
+    # exist_ok=True prevents errors if the folder already exists.
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+    # ---- Save the model's learned weights ----
+    # model.state_dict() returns the dictionary of all parameters.
+    # torch.save() serializes it (converts to bytes) and writes to disk.
+    #
+    # We save ONLY the state_dict, not the entire model object.
+    # This is the recommended approach because:
+    # 1. It's smaller (just the numbers, not the code)
+    # 2. It's more portable (works even if you change the code slightly)
+    # 3. It's the PyTorch community convention
+    torch.save(model.state_dict(), filepath)
+
+    # ---- Report file size ----
+    # os.path.getsize() returns file size in bytes.
+    # Divide by 1024 to get kilobytes (KB).
+    file_size_kb = os.path.getsize(filepath) / 1024
+    print(f"  Model saved to {filepath} ({file_size_kb:.1f} KB)")
+
+
+def save_vocabulary(vocab, filepath="outputs/vocab.pth"):
+    """
+    Save the vocabulary mappings to disk.
+
+    WHY SAVE THE VOCABULARY?
+        The model outputs NUMBERS (indices 0-47). To convert those
+        numbers back to text, we need the SAME idx_to_char mapping
+        that was used during training.
+
+        If we rebuilt the vocabulary from different text, the mappings
+        could be different (e.g., 'a' might map to 23 instead of 22),
+        and the generated text would be gibberish.
+
+        So we save the vocabulary alongside the model to ensure
+        encode/decode work correctly during generation (Step 12).
+
+    WHAT WE SAVE:
+        A dictionary with three essential pieces:
+        {
+            'chars':       ['\n', ' ', ',', '.', ...],  # the 48 characters
+            'char_to_idx': {'\n': 0, ' ': 1, ...},     # encoding map
+            'idx_to_char': {0: '\n', 1: ' ', ...},     # decoding map
+        }
+
+    PARAMETERS:
+        vocab (Vocabulary): The vocabulary to save
+        filepath (str):     Where to save (default: outputs/vocab.pth)
+
+    RETURNS:
+        None (writes file to disk)
+    """
+
+    # ---- Ensure the output directory exists ----
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+    # ---- Save vocabulary as a dictionary ----
+    # We extract the three key attributes from the Vocabulary object
+    # and save them as a plain dictionary. This makes it easy to
+    # reconstruct the vocabulary later without needing the original text.
+    vocab_data = {
+        'chars': vocab.chars,
+        'char_to_idx': vocab.char_to_idx,
+        'idx_to_char': vocab.idx_to_char,
+    }
+
+    torch.save(vocab_data, filepath)
+
+    file_size_kb = os.path.getsize(filepath) / 1024
+    print(f"  Vocabulary saved to {filepath} ({file_size_kb:.1f} KB)")
+
+
 def main():
     """
-    Main function — wires up the full pipeline and trains for one epoch.
+    Main function — full training pipeline with multi-epoch training.
 
     FLOW:
         1. Load data/input.txt
@@ -228,15 +448,30 @@ def main():
         4. Create DataLoader (Step 06)
         5. Create TinyLanguageModel (Step 07)
         6. Create loss function + optimizer (Step 08)
-        7. Train for one epoch (Step 09) ← NEW
-        8. Report results
+        7. Train for MANY epochs (Step 10) ← NEW
+        8. Save trained model + vocabulary to disk ← NEW
+        9. Report results
+
+    TRAINING CONFIGURATION:
+        - num_epochs = 100  → the model sees all data 100 times
+        - batch_size = 16   → 7 batches per epoch
+        - learning_rate = 0.003 → slightly faster than default 0.001
+        - Total weight updates: 100 × 7 = 700
+
+        Why 100 epochs? For our small dataset (6201 chars), 100 epochs
+        is enough to learn most patterns without severe overfitting.
+        Larger datasets need fewer epochs; smaller ones need more.
+
+        Why lr=0.003? Our model is small and our dataset is small.
+        A slightly higher learning rate helps it converge faster.
+        For larger models, lower learning rates are safer.
     """
 
     # ==================================================================
     # SETUP: Wire up the full pipeline
     # ==================================================================
     print("=" * 60)
-    print("STEP 09: TRAINING — ONE EPOCH")
+    print("STEP 10: FULL TRAINING — MULTIPLE EPOCHS")
     print("=" * 60)
     print()
 
@@ -267,57 +502,102 @@ def main():
     print(f"Model: TinyLanguageModel with {total_params:,} parameters")
 
     # ---- Step F: Create loss function and optimizer ----
+    # Using lr=0.003 instead of default 0.001 because our model and
+    # dataset are small. A slightly higher learning rate helps the
+    # model converge (reach low loss) faster.
+    learning_rate = 0.003
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    print(f"Loss: CrossEntropyLoss | Optimizer: Adam (lr=0.001)")
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    print(f"Loss: CrossEntropyLoss | Optimizer: Adam (lr={learning_rate})")
     print()
 
     # ==================================================================
-    # TRAINING: One epoch
+    # TRAINING: Multiple epochs
     # ==================================================================
-    # Expected: loss starts around 3.87 (random) and decreases by the
-    # end of the epoch. Even with just 7 batches, you should see the
-    # loss drop noticeably.
+    # With 100 epochs and 7 batches per epoch, the model's weights
+    # will be updated 700 times. Each update nudges all 248,880
+    # parameters in the direction that reduces the loss.
 
-    import math
+    num_epochs = 100
     random_baseline = -math.log(1.0 / vocab.vocab_size)
+
     print(f"Random baseline loss: {random_baseline:.4f}")
-    print(f"(If the model is learning, loss should drop below this)")
+    print(f"Training for {num_epochs} epochs ({num_epochs * len(dataloader)} "
+          f"total weight updates)...")
     print()
 
-    print(f"--- Training epoch 0 ({len(dataloader)} batches) ---")
-    avg_loss = train_one_epoch(model, dataloader, loss_fn, optimizer,
-                               vocab.vocab_size, epoch_num=0)
+    # ---- Run the training loop ----
+    # train() calls train_one_epoch() for each epoch and collects
+    # the average loss into a list: [loss_0, loss_1, ..., loss_99]
+    loss_history = train(
+        model, dataloader, loss_fn, optimizer,
+        vocab.vocab_size, num_epochs=num_epochs, print_every=10
+    )
 
+    # ==================================================================
+    # RESULTS: Summarize what the model learned
+    # ==================================================================
     print()
-    print(f"  Epoch 0 complete!")
-    print(f"    Average loss : {avg_loss:.4f}")
-    print(f"    Random base  : {random_baseline:.4f}")
-    print(f"    Improvement  : {random_baseline - avg_loss:+.4f}")
+    print("=" * 60)
+    print("TRAINING COMPLETE")
+    print("=" * 60)
+
+    # ---- Report the improvement ----
+    # loss_history[0] = first epoch's loss (near random)
+    # loss_history[-1] = last epoch's loss (much lower)
+    first_loss = loss_history[0]
+    final_loss = loss_history[-1]
+    best_loss = min(loss_history)
+    best_epoch = loss_history.index(best_loss)
+
+    print(f"""
+  Training summary:
+    Epochs trained  : {num_epochs}
+    Weight updates  : {num_epochs * len(dataloader)}
+    Random baseline : {random_baseline:.4f}
+    First epoch loss: {first_loss:.4f}
+    Final epoch loss: {final_loss:.4f}
+    Best epoch loss : {best_loss:.4f} (epoch {best_epoch})
+    Total improvement: {first_loss - final_loss:.4f} ({((first_loss - final_loss) / first_loss * 100):.1f}% reduction)
+""")
+
+    # ==================================================================
+    # SAVE: Write model and vocabulary to disk
+    # ==================================================================
+    # After all that training, we save the results so we don't have
+    # to retrain every time we want to generate text.
+
+    print("Saving trained model and vocabulary...")
+    save_model(model, filepath="outputs/model.pth")
+    save_vocabulary(vocab, filepath="outputs/vocab.pth")
     print()
 
-    if avg_loss < random_baseline:
-        print(f"  The model is learning! Loss dropped below random baseline.")
-    else:
-        print(f"  Loss is still near random — one epoch isn't always enough.")
+    # ---- Save loss history for plotting (Step 11) ----
+    # We also save the loss history so the plotting step can
+    # create a chart without retraining.
+    torch.save(loss_history, "outputs/loss_history.pth")
+    print(f"  Loss history saved to outputs/loss_history.pth ({len(loss_history)} epochs)")
     print()
 
     # ==================================================================
     # WHAT COMES NEXT
     # ==================================================================
     print("=" * 60)
-    print("WHAT COMES NEXT (Step 10)")
+    print("WHAT COMES NEXT (Step 11)")
     print("=" * 60)
     print("""
-We just trained for ONE epoch (7 batches, 7 weight updates).
-The loss dropped a bit, but the model is far from good.
+The model is trained and saved! Next steps:
 
-In Step 10, we'll train for MANY epochs (e.g., 50-100) and:
-  - Track the loss at each epoch
-  - Save the trained model to disk (outputs/model.pth)
-  - Watch the loss curve descend over time
+  Step 11: Plot the loss curve (loss_history → chart)
+           Visualize how loss decreased over 100 epochs.
 
-More epochs = more learning = better text generation.
+  Step 12: Generate text using the saved model
+           Load model.pth + vocab.pth → produce new text!
+
+Files saved:
+  outputs/model.pth        — trained model weights (248,880 parameters)
+  outputs/vocab.pth        — vocabulary mappings (48 characters)
+  outputs/loss_history.pth — loss values for plotting
 """)
 
 

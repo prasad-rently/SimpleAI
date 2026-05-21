@@ -23,6 +23,7 @@
   - [Step 07 — Neural Network Model](#step-07--neural-network-model)
   - [Step 08 — Loss Function and Optimizer](#step-08--loss-function-and-optimizer)
   - [Step 09 — Single Epoch Training](#step-09--single-epoch-training)
+  - [Step 10 — Full Training and Model Saving](#step-10--full-training-and-model-saving)
 - [Glossary](#glossary)
 
 ---
@@ -739,19 +740,31 @@ optimizer.zero_grad()                       # 5. Clear gradients
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Train the model for one complete epoch — wires up the entire pipeline end-to-end |
-| **Created in** | Step 09 |
+| **Purpose** | Train the model for multiple epochs and save the trained weights to disk |
+| **Created in** | Step 09, extended in Step 10 |
 | **Run with** | `PYTHONPATH=src python src/train.py` |
 | **Input** | Reads `data/input.txt`, imports `Vocabulary`, `TextDataset`, `create_dataloader`, `TinyLanguageModel` |
-| **Output** | Loss per batch, epoch summary (average loss vs random baseline) |
+| **Output** | `outputs/model.pth` (trained weights), `outputs/vocab.pth` (vocabulary), `outputs/loss_history.pth` (loss per epoch) |
 | **Imports** | `vocabulary.py`, `dataset.py`, `model.py` |
 
 **Functions:**
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `train_one_epoch(model, dataloader, loss_fn, optimizer, vocab_size, epoch_num)` | model (TinyLanguageModel), dataloader (DataLoader), loss_fn (CrossEntropyLoss), optimizer (Adam), vocab_size (int), epoch_num (int, default=0) | `float` (average loss) | Runs the 5-step training cycle on every batch in the dataloader. Prints per-batch loss and returns the epoch's average loss. |
-| `main()` | None | None | Wires up the full pipeline: load text → build vocab → create dataset → create dataloader → create model → create loss_fn + optimizer → train one epoch → report results. |
+| `train_one_epoch(model, dataloader, loss_fn, optimizer, vocab_size, epoch_num)` | model, dataloader, loss_fn, optimizer, vocab_size (int), epoch_num (int, default=0) | `float` (average loss) | Runs the 5-step training cycle on every batch. Returns average loss for the epoch. |
+| `train(model, dataloader, loss_fn, optimizer, vocab_size, num_epochs, print_every)` | model, dataloader, loss_fn, optimizer, vocab_size (int), num_epochs (int, default=50), print_every (int, default=5) | `list[float]` (loss history) | Calls train_one_epoch() repeatedly, collecting average loss per epoch into a list. Prints progress at intervals. |
+| `save_model(model, filepath)` | model (TinyLanguageModel), filepath (str, default="outputs/model.pth") | None | Saves `model.state_dict()` to disk using `torch.save()`. Reports file size. |
+| `save_vocabulary(vocab, filepath)` | vocab (Vocabulary), filepath (str, default="outputs/vocab.pth") | None | Saves chars, char_to_idx, idx_to_char as a dictionary to disk. |
+| `main()` | None | None | Full pipeline: load → build → create → train 100 epochs → save model + vocab + loss history. |
+
+**Training configuration:**
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `num_epochs` | 100 | Enough passes for our small dataset to converge |
+| `batch_size` | 16 | 7 batches per epoch, 700 total weight updates |
+| `learning_rate` | 0.003 | Slightly faster than default 0.001 for small model/data |
+| `seq_length` | 50 | Characters per training example |
 
 **Detailed Flow:**
 
@@ -759,69 +772,59 @@ optimizer.zero_grad()                       # 5. Clear gradients
 main()
   │
   ├── Load data/input.txt → text (6201 chars)
-  │
   ├── Build Vocabulary(text) → vocab (48 chars)
-  │
   ├── Create TextDataset(text, vocab, seq_length=50) → 124 examples
-  │
   ├── Create DataLoader(dataset, batch_size=16, shuffle=True) → 7 batches
-  │
   ├── Create TinyLanguageModel(vocab_size=48) → 248,880 parameters
+  ├── Create CrossEntropyLoss() + Adam(lr=0.003)
   │
-  ├── Create CrossEntropyLoss() + Adam(lr=0.001)
-  │
-  ├── Compute random baseline: -log(1/48) ≈ 3.8712
-  │
-  └── train_one_epoch(model, dataloader, loss_fn, optimizer, 48, epoch_num=0)
+  └── train(model, dataloader, loss_fn, optimizer, 48, num_epochs=100)
       │
-      ├── model.train()  ← set training mode
-      │
-      ├── Batch 0: inputs (16,50), targets (16,50)
-      │   ├── logits, _ = model(inputs)           → logits (16, 50, 48)
-      │   ├── logits.view(-1, 48)                 → (800, 48)
-      │   ├── targets.view(-1)                    → (800,)
-      │   ├── loss = loss_fn(logits, targets)      → ~3.90
-      │   ├── loss.backward()                      → compute all gradients
-      │   ├── optimizer.step()                     → update 248,880 weights
-      │   └── optimizer.zero_grad()                → clear gradients
-      │
-      ├── Batch 1: loss ≈ 3.70 (already improving!)
-      ├── Batch 2: loss ≈ 3.48
-      ├── Batch 3: loss ≈ 3.25
-      ├── Batch 4: loss ≈ 3.10
-      ├── Batch 5: loss ≈ 2.97
-      └── Batch 6: loss ≈ 2.88
+      ├── Epoch 0:  train_one_epoch() → avg_loss ≈ 3.00
+      ├── Epoch 10: train_one_epoch() → avg_loss ≈ 1.28
+      ├── Epoch 20: train_one_epoch() → avg_loss ≈ 0.59
+      ├── Epoch 30: train_one_epoch() → avg_loss ≈ 0.20
+      ├── ...
+      ├── Epoch 90: train_one_epoch() → avg_loss ≈ 0.05
+      └── Epoch 99: train_one_epoch() → avg_loss ≈ 0.04
           │
-          └── avg_loss = sum(losses) / 7 ≈ 3.33
-              │
-              └── RETURN 3.33  (well below random baseline 3.87 ✓)
+          └── RETURN [3.00, ..., 0.04]  (100 loss values)
+                │
+                ├── save_model(model, "outputs/model.pth")
+                │     └── torch.save(model.state_dict(), ...) → 976 KB
+                │
+                ├── save_vocabulary(vocab, "outputs/vocab.pth")
+                │     └── torch.save({chars, char_to_idx, idx_to_char}) → 2 KB
+                │
+                └── torch.save(loss_history, "outputs/loss_history.pth")
 ```
 
-**What "wiring up the pipeline" means:**
+**What gets saved to disk:**
 
 ```
-This is where ALL previous steps come together:
-
-  Step 03: data/input.txt        ─┐
-  Step 04: Vocabulary             │── train.py connects them all
-  Step 05: TextDataset            │
-  Step 06: DataLoader             │
-  Step 07: TinyLanguageModel      │
-  Step 08: CrossEntropyLoss+Adam ─┘
-
-Before Step 09: each file was tested in isolation.
-After Step 09:  they work together as a real training system.
+outputs/
+  ├── model.pth          ← 248,880 trained weights (~976 KB)
+  │                        Loaded by: generate.py (Step 12)
+  │
+  ├── vocab.pth          ← {chars, char_to_idx, idx_to_char} (~2 KB)
+  │                        Loaded by: generate.py (Step 12)
+  │                        Needed to decode model output → text
+  │
+  └── loss_history.pth   ← [3.00, 2.71, ..., 0.04] (100 floats)
+                           Loaded by: plot_loss.py (Step 11)
+                           Used to draw the training curve
 ```
 
 **Key concepts introduced:**
 
 | Concept | Explanation | Example |
 |---------|-------------|---------|
-| **Epoch** | One complete pass through all training data. 7 batches × 16 examples = 112 examples processed. | After 1 epoch, loss dropped from 3.90 to 2.88 |
-| **Training loop** | The outer loop that iterates over batches, running the 5-step cycle on each | `for batch_idx, (inputs, targets) in enumerate(dataloader)` |
-| **model.train()** | Sets PyTorch model to training mode. Enables dropout, batchnorm, etc. Always call before training. | Good practice even for simple models |
-| **Average loss** | Mean loss across all batches in an epoch. Smooths batch-to-batch noise for a clearer signal. | 3.33 (vs individual batch losses that bounce around) |
-| **Random baseline** | The expected loss if the model guessed randomly: -log(1/vocab_size). A starting reference point. | -log(1/48) ≈ 3.87 |
+| **Multi-epoch training** | Running many passes over the same data. Each pass refines the model further. | 100 epochs = 700 weight updates, loss 3.00 → 0.04 |
+| **Loss history** | A list of average loss values, one per epoch. Shows whether training is working. | `[3.00, 2.71, 2.31, ..., 0.04]` |
+| **state_dict()** | A dictionary of ALL learnable parameters in the model. The standard way to save/load models. | `{'embedding.weight': tensor(...), 'rnn.weight_ih_l0': ...}` |
+| **torch.save()** | Serializes tensors/dicts to a file using Python's pickle. Convention: `.pth` extension. | `torch.save(model.state_dict(), "model.pth")` |
+| **Convergence** | When loss stops decreasing meaningfully — the model has learned what it can from the data. | Loss plateaus around 0.04 after ~80 epochs |
+| **Serialization** | Converting in-memory objects (tensors) to bytes that can be saved to disk and loaded later. | Model in RAM → `torch.save()` → file on disk |
 
 ---
 
@@ -1258,6 +1261,119 @@ data/input.txt
 
 ---
 
+### Step 10 — Full Training and Model Saving
+
+**What was built:** Extended `train.py` with a `train()` function that runs 100 epochs, plus `save_model()` and `save_vocabulary()` to persist everything to disk.
+
+**Why it matters:** One epoch (Step 09) showed the model can learn, but 7 weight updates aren't enough. Step 10 runs 100 epochs (700 weight updates), driving the loss from ~3.00 down to ~0.04. The trained weights and vocabulary are saved to disk so we can generate text (Step 12) without retraining.
+
+```
+What changed:
+  ~ src/train.py  ← added train(), save_model(), save_vocabulary()
+
+Run:
+  PYTHONPATH=src python src/train.py
+
+Expected output:
+  Epoch   0/100 | Avg Loss: 2.9979
+  Epoch  10/100 | Avg Loss: 1.2762
+  Epoch  20/100 | Avg Loss: 0.5932
+  ...
+  Epoch  99/100 | Avg Loss: 0.0434
+  Model saved to outputs/model.pth (975.7 KB)
+  Vocabulary saved to outputs/vocab.pth (2.0 KB)
+
+Generated files:
+  outputs/model.pth        ← trained weights (976 KB)
+  outputs/vocab.pth        ← vocabulary mappings (2 KB)
+  outputs/loss_history.pth ← loss per epoch for plotting (Step 11)
+```
+
+**Key numbers:**
+
+| Metric | Value |
+|--------|-------|
+| Epochs | 100 |
+| Weight updates | 700 (100 epochs × 7 batches) |
+| Learning rate | 0.003 |
+| First epoch loss | ~3.00 |
+| Final epoch loss | ~0.04 |
+| Reduction | 98.6% |
+| Model file size | ~976 KB |
+
+**Key takeaway:** Training is just the 5-line cycle from Step 08, repeated 700 times. The magic is repetition — each pass through the data refines the weights a little more. Saving the model means we never have to retrain to generate text.
+
+**The flow so far:**
+
+```
+data/input.txt
+       │
+       └──▶ train.py
+               │
+               ├── Pipeline setup (same as Step 09)
+               │     Vocabulary → TextDataset → DataLoader → Model → Loss+Optimizer
+               │
+               └── train(num_epochs=100)  ← NEW: multi-epoch loop
+                     │
+                     ├── Epoch  0: train_one_epoch() → loss ≈ 3.00
+                     ├── Epoch 10: train_one_epoch() → loss ≈ 1.28
+                     ├── Epoch 20: train_one_epoch() → loss ≈ 0.59
+                     ├── ...
+                     └── Epoch 99: train_one_epoch() → loss ≈ 0.04
+                           │
+                           ├── save_model()      → outputs/model.pth
+                           ├── save_vocabulary()  → outputs/vocab.pth
+                           └── save loss_history  → outputs/loss_history.pth
+```
+
+**What the loss curve looks like:**
+
+```
+Loss
+ 3.0 │*
+     │ *
+ 2.5 │  *
+     │   *
+ 2.0 │    *
+     │     *
+ 1.5 │      *
+     │       **
+ 1.0 │         **
+     │           ***
+ 0.5 │              ****
+     │                  *********
+ 0.0 │                           ****************************
+     └───────────────────────────────────────────────────────
+     0    10    20    30    40    50    60    70    80    90  100
+                              Epoch
+
+  Sharp drop (0-30):  model learns common patterns fast
+  Gradual plateau (30-100): diminishing returns, fine-tuning
+```
+
+**How model saving works:**
+
+```
+SAVING (after training):
+  model.state_dict()
+    ├── embedding.weight    (48, 128)   ─┐
+    ├── rnn.weight_ih_l0    (256, 128)   │
+    ├── rnn.weight_hh_l0    (256, 256)   │
+    ├── rnn.bias_ih_l0      (256,)       ├── torch.save() → outputs/model.pth
+    ├── rnn.weight_ih_l1    (256, 256)   │
+    ├── rnn.weight_hh_l1    (256, 256)   │
+    ├── rnn.bias_*          (256,) ×2    │
+    └── output_layer.*      (48, 256)   ─┘
+
+LOADING (in Step 12 — generation):
+  model = TinyLanguageModel(48)          ← fresh model (random weights)
+  model.load_state_dict(torch.load("outputs/model.pth"))
+                                         ← overwrite with trained weights
+  Now model is ready to generate text without retraining!
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1312,10 +1428,16 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Average loss** | Mean loss across all batches in one epoch. Smooths noise for a clearer picture of learning progress. | Step 09 |
 | **Random baseline** | Expected loss if the model guessed uniformly: -log(1/vocab_size). For 48 chars ≈ 3.87. Untrained models start here. | Step 09 |
 | **Pipeline** | The end-to-end flow from raw text through all components to trained weights. Step 09 wires it up for the first time. | Step 09 |
+| **Multi-epoch training** | Running many passes (epochs) over the same data. More epochs = more refined weights. | Step 10 |
+| **Loss history** | A list of average loss values, one per epoch: `[3.00, 2.71, ..., 0.04]`. Used for plotting the training curve. | Step 10 |
+| **state_dict()** | Dictionary of all learnable parameters in a model. The standard way to save and load PyTorch models. | Step 10 |
+| **torch.save()** | Serializes Python objects (tensors, dicts) to a binary file on disk. Convention: `.pth` extension. | Step 10 |
+| **Convergence** | When loss stops decreasing — the model has learned what it can from the data with its current capacity. | Step 10 |
+| **Serialization** | Converting in-memory objects (like tensors) to bytes that can be written to disk and loaded later. | Step 10 |
 | **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
 | **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 09.*
+> *This document is updated with each new step. Last updated: Step 10.*
