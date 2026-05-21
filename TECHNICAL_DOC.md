@@ -25,6 +25,7 @@
   - [Step 09 — Single Epoch Training](#step-09--single-epoch-training)
   - [Step 10 — Full Training and Model Saving](#step-10--full-training-and-model-saving)
   - [Step 11 — Loss Curve Visualization](#step-11--loss-curve-visualization)
+  - [Step 12 — Text Generation](#step-12--text-generation)
 - [Glossary](#glossary)
 
 ---
@@ -884,6 +885,75 @@ main()
 
 ---
 
+#### `src/generate.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Generate new text using the trained model (inference) |
+| **Created in** | Step 12 |
+| **Run with** | `PYTHONPATH=src python src/generate.py` |
+| **Input** | `outputs/model.pth` (trained weights), `outputs/vocab.pth` (vocabulary) |
+| **Output** | Generated text printed to console |
+| **Imports** | `model.py` (TinyLanguageModel) |
+
+**Functions:**
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `load_model(model_path, vocab_size)` | model_path (str, default="outputs/model.pth"), vocab_size (int, default=48) | `TinyLanguageModel` | Creates fresh model, loads trained weights via `load_state_dict()`, sets to eval mode. |
+| `load_vocabulary(vocab_path)` | vocab_path (str, default="outputs/vocab.pth") | `dict` | Loads the saved vocabulary dictionary with chars, char_to_idx, idx_to_char. |
+| `generate_text(model, vocab_data, seed_text, length)` | model, vocab_data (dict), seed_text (str, default="The"), length (int, default=200) | `str` | Generates text character by character using greedy (argmax) decoding. Returns seed + generated text. |
+| `main()` | None | None | Loads model + vocab, generates text with 5 different seed texts, explains the output. |
+
+**Detailed Flow (generate_text):**
+
+```
+generate_text(model, vocab_data, seed_text="The", length=200)
+  │
+  ├── Encode seed: "The" → [19, 29, 26]
+  │
+  ├── hidden = None  (RNN starts with no context)
+  │
+  └── with torch.no_grad():  ← disable gradient tracking (faster)
+        │
+        ├── Iteration 0:
+        │   ├── input = tensor([[19, 29, 26]])     shape (1, 3)
+        │   ├── logits, hidden = model(input)       shape (1, 3, 48)
+        │   ├── next_logits = logits[0, -1, :]     shape (48,)
+        │   ├── next_idx = argmax(next_logits)      → 1
+        │   ├── next_char = idx_to_char[1]          → ' '
+        │   └── text = "The "
+        │
+        ├── Iteration 1:
+        │   ├── input = tensor([[1]])               shape (1, 1)
+        │   │   (only last char — hidden carries context)
+        │   ├── logits, hidden = model(input, hidden)
+        │   ├── next_idx = argmax(...)              → 36 ('o')
+        │   └── text = "The o"
+        │
+        ├── Iteration 2:
+        │   ├── input = tensor([[36]])              → 'n'
+        │   └── text = "The on"
+        │
+        ├── ... (200 iterations total)
+        │
+        └── RETURN "The only way to do great work..."
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Inference** | Using a trained model to produce output. No learning happens — weights are frozen. | Load model → feed text → get predictions |
+| **Autoregressive** | Each generated character becomes input for the next prediction. The model feeds its own output back in. | "The" → predict ' ' → "The " → predict 'o' → ... |
+| **Greedy decoding** | Always pick the highest-scoring character. Deterministic but can get repetitive. | argmax([0.1, 0.7, 0.2]) → pick index 1 |
+| **Seed text** | Initial text that gives the model starting context. Different seeds produce different outputs. | "The" → quotes about possibility; "Life" → quotes about living |
+| **model.eval()** | Sets model to evaluation mode. Disables training-specific behaviors. Always use before inference. | `model.eval()` before generating |
+| **torch.no_grad()** | Context manager that disables gradient tracking. Saves memory and speeds up inference. | `with torch.no_grad(): ...` |
+| **unsqueeze(0)** | Adds a dimension at position 0. Converts (seq_len,) → (1, seq_len) to add the batch dimension. | `tensor([1,2,3]).unsqueeze(0)` → `tensor([[1,2,3]])` |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -1496,6 +1566,91 @@ outputs/loss_history.pth   ← saved by train.py (Step 10)
 
 ---
 
+### Step 12 — Text Generation
+
+**What was built:** A `generate.py` script that loads the trained model and generates new text character by character using greedy decoding.
+
+**Why it matters:** This is the moment the model PRODUCES output. Everything up to now was preparation (data, model, training, visualization). Step 12 is where you see what the model actually learned — it generates text that resembles the inspirational quotes it was trained on.
+
+```
+What changed:
+  + src/generate.py   ← load model + vocab, generate text with greedy decoding
+
+Run:
+  PYTHONPATH=src python src/generate.py
+
+Expected output:
+  Generated text from 5 different seeds ("The", "Life", "In the",
+  "Success", "Be") — each producing ~200 characters of text that
+  resembles the training data (inspirational quotes).
+```
+
+**Example output:**
+
+```
+--- Seed: "The" ---
+The only impossible journey is the one you never betarn you are
+one most responsive to change...
+
+--- Seed: "Life" ---
+Life is what happens when you are busy making others happy too.
+The purpose of our lives is to be happy...
+```
+
+**Key takeaway:** The model learned real patterns from the training data — it generates recognizable words, phrases, and sentence structures. Greedy decoding is deterministic but repetitive; Step 13 adds temperature for more creative output.
+
+**The flow so far:**
+
+```
+outputs/model.pth    ← trained weights (from Step 10)
+outputs/vocab.pth    ← vocabulary (from Step 10)
+       │
+       └──▶ generate.py  ← NEW: text generation
+               │
+               ├── load_model()
+               │     ├── TinyLanguageModel(48)     ← fresh model
+               │     ├── load_state_dict(...)       ← load trained weights
+               │     └── model.eval()               ← inference mode
+               │
+               ├── load_vocabulary()
+               │     └── {chars, char_to_idx, idx_to_char}
+               │
+               └── generate_text("The", length=200)
+                     │
+                     ├── Encode "The" → [19, 29, 26]
+                     ├── Model predicts → ' ' → "The "
+                     ├── Model predicts → 'o' → "The o"
+                     ├── Model predicts → 'n' → "The on"
+                     ├── ... (200 iterations)
+                     └── "The only way to do great work..."
+```
+
+**The complete pipeline (Steps 03-12):**
+
+```
+  data/input.txt                      ← raw text
+       │
+       ▼
+  Vocabulary + TextDataset + DataLoader  ← data pipeline (Steps 04-06)
+       │
+       ▼
+  TinyLanguageModel                   ← architecture (Step 07)
+       │
+       ▼
+  train() for 100 epochs              ← training (Steps 08-10)
+       │
+       ▼
+  outputs/model.pth + vocab.pth       ← saved to disk (Step 10)
+       │
+       ▼
+  plot_loss.py → loss_plot.png        ← visualize training (Step 11)
+       │
+       ▼
+  generate.py → "The only way..."    ← text generation (Step 12) ✓
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1560,10 +1715,15 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **matplotlib** | Python's standard charting/plotting library. `plt.plot(x, y)` draws a line chart. Used by scientists and engineers worldwide. | Step 11 |
 | **Agg backend** | Non-interactive matplotlib renderer. Writes charts directly to image files without needing a GUI window. | Step 11 |
 | **Plateau** | When the loss curve flattens — the model has converged and further training yields diminishing returns. | Step 11 |
-| **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
+| **Inference** | Using a trained model to produce output (generate text). No learning happens — weights are frozen. | Step 12 |
+| **Autoregressive** | Each output becomes input for the next step. The model generates one char, feeds it back in, generates the next. | Step 12 |
+| **Greedy decoding** | Always pick the highest-scoring prediction. Deterministic but can get stuck in repetitive loops. | Step 12 |
+| **Seed text** | Starting text that gives the model initial context. Different seeds lead to different generated text. | Step 12 |
+| **torch.no_grad()** | Context manager that disables gradient tracking during inference. Saves memory and speeds up generation. | Step 12 |
+| **load_state_dict()** | Loads saved weights into a model. Reverses the save process — overwrites random weights with trained ones. | Step 12 |
 | **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 11.*
+> *This document is updated with each new step. Last updated: Step 12.*
