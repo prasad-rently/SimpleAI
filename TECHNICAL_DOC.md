@@ -26,6 +26,7 @@
   - [Step 10 — Full Training and Model Saving](#step-10--full-training-and-model-saving)
   - [Step 11 — Loss Curve Visualization](#step-11--loss-curve-visualization)
   - [Step 12 — Text Generation](#step-12--text-generation)
+  - [Step 13 — Temperature Control](#step-13--temperature-control)
 - [Glossary](#glossary)
 
 ---
@@ -889,8 +890,8 @@ main()
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Generate new text using the trained model (inference) |
-| **Created in** | Step 12 |
+| **Purpose** | Generate new text using the trained model (inference), with optional temperature control |
+| **Created in** | Step 12, extended in Step 13 |
 | **Run with** | `PYTHONPATH=src python src/generate.py` |
 | **Input** | `outputs/model.pth` (trained weights), `outputs/vocab.pth` (vocabulary) |
 | **Output** | Generated text printed to console |
@@ -902,8 +903,9 @@ main()
 |----------|-----------|---------|-------------|
 | `load_model(model_path, vocab_size)` | model_path (str, default="outputs/model.pth"), vocab_size (int, default=48) | `TinyLanguageModel` | Creates fresh model, loads trained weights via `load_state_dict()`, sets to eval mode. |
 | `load_vocabulary(vocab_path)` | vocab_path (str, default="outputs/vocab.pth") | `dict` | Loads the saved vocabulary dictionary with chars, char_to_idx, idx_to_char. |
-| `generate_text(model, vocab_data, seed_text, length)` | model, vocab_data (dict), seed_text (str, default="The"), length (int, default=200) | `str` | Generates text character by character using greedy (argmax) decoding. Returns seed + generated text. |
-| `main()` | None | None | Loads model + vocab, generates text with 5 different seed texts, explains the output. |
+| `generate_text(model, vocab_data, seed_text, length)` | model, vocab_data (dict), seed_text (str, default="The"), length (int, default=200) | `str` | Generates text using greedy (argmax) decoding. Deterministic. Returns seed + generated text. |
+| `generate_text_with_temperature(model, vocab_data, seed_text, length, temperature)` | model, vocab_data (dict), seed_text (str, default="The"), length (int, default=200), temperature (float, default=1.0) | `str` | Generates text using temperature-controlled sampling. Non-deterministic. Low temp = safe, high temp = creative. |
+| `main()` | None | None | Loads model + vocab, compares greedy vs 6 temperature levels, generates with multiple seeds. |
 
 **Detailed Flow (generate_text):**
 
@@ -1651,6 +1653,85 @@ outputs/vocab.pth    ← vocabulary (from Step 10)
 
 ---
 
+### Step 13 — Temperature Control
+
+**What was built:** A `generate_text_with_temperature()` function that adds randomness control to text generation using the temperature parameter.
+
+**Why it matters:** Greedy decoding (Step 12) is deterministic and repetitive. Temperature-controlled sampling lets you dial in the creativity level — from safe and predictable (0.3) to wild and experimental (2.0). This is the same "temperature" slider used in ChatGPT, Claude, and all modern language models.
+
+```
+What changed:
+  ~ src/generate.py  ← added generate_text_with_temperature(), updated main()
+
+Run:
+  PYTHONPATH=src python src/generate.py
+
+Expected output:
+  Greedy text, then 6 temperature levels (0.3, 0.5, 0.8, 1.0, 1.5, 2.0)
+  showing progressively more creative/random output.
+  Multiple seeds at temperature 0.8.
+```
+
+**Temperature comparison (same seed "The"):**
+
+```
+Temp 0.3: "The only way to do great work is to love what you do..."
+          → Clean, predictable, close to training data
+
+Temp 0.8: "The only impossible journey is the one you never bet..."
+          → Slightly creative, still coherent
+
+Temp 1.5: "The only impossible jound is in the direction..."
+          → Unexpected word choices, some errors
+
+Temp 2.0: "The only way to do greapEy to be I and ghe shots..."
+          → Mostly nonsense — too much randomness
+```
+
+**Key takeaway:** Temperature is a single number that controls the tradeoff between predictability and creativity. 0.8 is a practical sweet spot — creative enough to avoid repetition, safe enough to stay coherent.
+
+**How temperature works (the math):**
+
+```
+Model outputs logits:  [8.0, 5.0, 2.0, 1.0]
+
+Step 1: Divide by temperature
+  temp=0.3 → [26.7, 16.7, 6.7, 3.3]   (differences amplified)
+  temp=1.0 → [8.0, 5.0, 2.0, 1.0]     (unchanged)
+  temp=2.0 → [4.0, 2.5, 1.0, 0.5]     (differences compressed)
+
+Step 2: softmax → probabilities
+  temp=0.3 → [0.999, 0.001, 0.000, 0.000]  (winner takes all)
+  temp=1.0 → [0.933, 0.046, 0.002, 0.001]  (clear favorite)
+  temp=2.0 → [0.621, 0.215, 0.049, 0.030]  (more spread out)
+
+Step 3: Sample from distribution
+  temp=0.3 → almost always picks index 0
+  temp=2.0 → index 1 has 22% chance of being picked
+```
+
+**The flow so far:**
+
+```
+outputs/model.pth + vocab.pth
+       │
+       └──▶ generate.py
+               │
+               ├── generate_text()               ← greedy (Step 12)
+               │     └── argmax(logits)           → deterministic
+               │
+               └── generate_text_with_temperature()  ← NEW (Step 13)
+                     ├── logits / temperature      → scale scores
+                     ├── F.softmax(scaled)          → probabilities
+                     └── torch.multinomial(probs)   → random sample
+                           │
+                           ├── temp 0.3 → safe, predictable
+                           ├── temp 0.8 → creative, coherent
+                           └── temp 2.0 → wild, often nonsense
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1721,9 +1802,12 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Seed text** | Starting text that gives the model initial context. Different seeds lead to different generated text. | Step 12 |
 | **torch.no_grad()** | Context manager that disables gradient tracking during inference. Saves memory and speeds up generation. | Step 12 |
 | **load_state_dict()** | Loads saved weights into a model. Reverses the save process — overwrites random weights with trained ones. | Step 12 |
-| **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
+| **Temperature** | Controls randomness by scaling logits before softmax. Low (0.3) = predictable, high (2.0) = chaotic. Same concept used in ChatGPT/Claude. | Step 13 |
+| **Softmax** | Converts raw scores (logits) into probabilities summing to 1.0. `softmax(x_i) = exp(x_i) / sum(exp(x_j))`. | Step 13 |
+| **Sampling** | Randomly picking from a probability distribution instead of always choosing the maximum. Makes output non-deterministic. | Step 13 |
+| **torch.multinomial** | Draws random samples from a probability distribution. The core of temperature-based generation. | Step 13 |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 12.*
+> *This document is updated with each new step. Last updated: Step 13.*
