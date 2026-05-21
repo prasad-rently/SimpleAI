@@ -22,6 +22,7 @@
   - [Step 06 — DataLoader Batching](#step-06--dataloader-batching)
   - [Step 07 — Neural Network Model](#step-07--neural-network-model)
   - [Step 08 — Loss Function and Optimizer](#step-08--loss-function-and-optimizer)
+  - [Step 09 — Single Epoch Training](#step-09--single-epoch-training)
 - [Glossary](#glossary)
 
 ---
@@ -734,6 +735,96 @@ optimizer.zero_grad()                       # 5. Clear gradients
 
 ---
 
+#### `src/train.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Train the model for one complete epoch — wires up the entire pipeline end-to-end |
+| **Created in** | Step 09 |
+| **Run with** | `PYTHONPATH=src python src/train.py` |
+| **Input** | Reads `data/input.txt`, imports `Vocabulary`, `TextDataset`, `create_dataloader`, `TinyLanguageModel` |
+| **Output** | Loss per batch, epoch summary (average loss vs random baseline) |
+| **Imports** | `vocabulary.py`, `dataset.py`, `model.py` |
+
+**Functions:**
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `train_one_epoch(model, dataloader, loss_fn, optimizer, vocab_size, epoch_num)` | model (TinyLanguageModel), dataloader (DataLoader), loss_fn (CrossEntropyLoss), optimizer (Adam), vocab_size (int), epoch_num (int, default=0) | `float` (average loss) | Runs the 5-step training cycle on every batch in the dataloader. Prints per-batch loss and returns the epoch's average loss. |
+| `main()` | None | None | Wires up the full pipeline: load text → build vocab → create dataset → create dataloader → create model → create loss_fn + optimizer → train one epoch → report results. |
+
+**Detailed Flow:**
+
+```
+main()
+  │
+  ├── Load data/input.txt → text (6201 chars)
+  │
+  ├── Build Vocabulary(text) → vocab (48 chars)
+  │
+  ├── Create TextDataset(text, vocab, seq_length=50) → 124 examples
+  │
+  ├── Create DataLoader(dataset, batch_size=16, shuffle=True) → 7 batches
+  │
+  ├── Create TinyLanguageModel(vocab_size=48) → 248,880 parameters
+  │
+  ├── Create CrossEntropyLoss() + Adam(lr=0.001)
+  │
+  ├── Compute random baseline: -log(1/48) ≈ 3.8712
+  │
+  └── train_one_epoch(model, dataloader, loss_fn, optimizer, 48, epoch_num=0)
+      │
+      ├── model.train()  ← set training mode
+      │
+      ├── Batch 0: inputs (16,50), targets (16,50)
+      │   ├── logits, _ = model(inputs)           → logits (16, 50, 48)
+      │   ├── logits.view(-1, 48)                 → (800, 48)
+      │   ├── targets.view(-1)                    → (800,)
+      │   ├── loss = loss_fn(logits, targets)      → ~3.90
+      │   ├── loss.backward()                      → compute all gradients
+      │   ├── optimizer.step()                     → update 248,880 weights
+      │   └── optimizer.zero_grad()                → clear gradients
+      │
+      ├── Batch 1: loss ≈ 3.70 (already improving!)
+      ├── Batch 2: loss ≈ 3.48
+      ├── Batch 3: loss ≈ 3.25
+      ├── Batch 4: loss ≈ 3.10
+      ├── Batch 5: loss ≈ 2.97
+      └── Batch 6: loss ≈ 2.88
+          │
+          └── avg_loss = sum(losses) / 7 ≈ 3.33
+              │
+              └── RETURN 3.33  (well below random baseline 3.87 ✓)
+```
+
+**What "wiring up the pipeline" means:**
+
+```
+This is where ALL previous steps come together:
+
+  Step 03: data/input.txt        ─┐
+  Step 04: Vocabulary             │── train.py connects them all
+  Step 05: TextDataset            │
+  Step 06: DataLoader             │
+  Step 07: TinyLanguageModel      │
+  Step 08: CrossEntropyLoss+Adam ─┘
+
+Before Step 09: each file was tested in isolation.
+After Step 09:  they work together as a real training system.
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Epoch** | One complete pass through all training data. 7 batches × 16 examples = 112 examples processed. | After 1 epoch, loss dropped from 3.90 to 2.88 |
+| **Training loop** | The outer loop that iterates over batches, running the 5-step cycle on each | `for batch_idx, (inputs, targets) in enumerate(dataloader)` |
+| **model.train()** | Sets PyTorch model to training mode. Enables dropout, batchnorm, etc. Always call before training. | Good practice even for simple models |
+| **Average loss** | Mean loss across all batches in an epoch. Smooths batch-to-batch noise for a clearer signal. | 3.33 (vs individual batch losses that bounce around) |
+| **Random baseline** | The expected loss if the model guessed randomly: -log(1/vocab_size). A starting reference point. | -log(1/48) ≈ 3.87 |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -1085,6 +1176,88 @@ Expected output:
 
 ---
 
+### Step 09 — Single Epoch Training
+
+**What was built:** A `train_one_epoch()` function and a `main()` that wires up the entire pipeline for the first time — data through model through training — running one complete epoch.
+
+**Why it matters:** This is the moment everything comes together. Steps 03-08 built individual components in isolation. Step 09 connects them into a working training system that actually learns. After one epoch (7 batches, 7 weight updates), the model shows measurable improvement.
+
+```
+What changed:
+  + src/train.py   ← train_one_epoch() + full pipeline main()
+
+Run:
+  PYTHONPATH=src python src/train.py
+
+Expected output:
+  Random baseline: 3.8712
+  Batch 0 loss: ~3.90  (near random)
+  Batch 1 loss: ~3.70  (improving)
+  ...
+  Batch 6 loss: ~2.88  (well below random)
+  Average loss:  ~3.33  (model is learning!)
+```
+
+**Key takeaway:** One epoch (7 weight updates) already drops the loss from random (~3.87) to ~3.33. The model is learning patterns from just one pass through the data. Step 10 will train for many epochs to drive the loss much lower.
+
+**The flow so far:**
+
+```
+data/input.txt
+       │
+       └──▶ train.py  ← NEW: wires everything together
+               │
+               ├── Vocabulary(text)                → 48 chars
+               ├── TextDataset(text, vocab, 50)    → 124 examples
+               ├── create_dataloader(dataset, 16)  → 7 batches
+               ├── TinyLanguageModel(48)           → 248,880 params
+               ├── CrossEntropyLoss()              → measures error
+               ├── Adam(lr=0.001)                  → updates weights
+               │
+               └── train_one_epoch()
+                     │
+                     ├── Batch 0: forward → loss → backward → step → zero_grad
+                     ├── Batch 1: forward → loss → backward → step → zero_grad
+                     ├── ...
+                     └── Batch 6: forward → loss → backward → step → zero_grad
+                           │
+                           └── avg_loss ≈ 3.33 (improved from ~3.87!)
+```
+
+**The complete data journey (Steps 03-09):**
+
+```
+  "The only way..."          ← raw text (Step 03)
+         │
+         ▼
+  [19, 29, 26, 1, ...]      ← encoded numbers (Step 04: Vocabulary)
+         │
+         ▼
+  input (50,), target (50,)  ← training pairs (Step 05: TextDataset)
+         │
+         ▼
+  input (16,50), target (16,50)  ← batched (Step 06: DataLoader)
+         │
+         ▼
+  logits (16,50,48)          ← predictions (Step 07: Model forward pass)
+         │
+         ▼
+  loss = 3.90                ← error measured (Step 08: CrossEntropyLoss)
+         │
+         ▼
+  loss.backward()            ← gradients computed (Step 08: backprop)
+         │
+         ▼
+  optimizer.step()           ← weights updated (Step 08: Adam)
+         │
+         ▼
+  Repeat for 7 batches       ← one epoch complete (Step 09: train.py)
+         │
+         └── avg_loss ≈ 3.33  (learning confirmed!)
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -1123,7 +1296,7 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **nn.Module** | PyTorch base class for all neural networks. Tracks parameters and provides save/load. | Step 07 |
 | **Loss** | A number measuring how wrong the model is. Random baseline ≈ 3.87. Good training → ~1.0. | Step 08 |
 | **CrossEntropyLoss** | Loss function for classification. Converts logits to probabilities, scores the correct answer. | Step 08 |
-| **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
+| **Epoch** | One complete pass through the entire training dataset. With 124 examples and batch_size=16, one epoch = 7 batches. | Step 09 |
 | **Batch** | A group of training examples processed together. Our batches hold 16 examples each. | Step 06 |
 | **Batch size** | Number of examples per batch. 16 for us. Larger = faster but more memory. Common: 8-128. | Step 06 |
 | **DataLoader** | PyTorch utility that wraps a Dataset to provide batching, shuffling, and iteration. | Step 06 |
@@ -1134,10 +1307,15 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Optimizer** | Algorithm that uses gradients to adjust weights. Adam is the most popular — adaptive learning rate per weight. | Step 08 |
 | **Learning rate** | How big each weight adjustment is. lr=0.001 is a common default for Adam. Too high → unstable, too low → slow. | Step 08 |
 | **zero_grad()** | Clears accumulated gradients before the next step. Forgetting this is a common PyTorch bug. | Step 08 |
+| **Training loop** | The outer loop that iterates over all batches, running the 5-step cycle on each. One iteration of this loop = one epoch. | Step 09 |
+| **model.train()** | Sets the model to training mode. Enables training-specific layers (dropout, batchnorm). Always call before training. | Step 09 |
+| **Average loss** | Mean loss across all batches in one epoch. Smooths noise for a clearer picture of learning progress. | Step 09 |
+| **Random baseline** | Expected loss if the model guessed uniformly: -log(1/vocab_size). For 48 chars ≈ 3.87. Untrained models start here. | Step 09 |
+| **Pipeline** | The end-to-end flow from raw text through all components to trained weights. Step 09 wires it up for the first time. | Step 09 |
 | **Inference** | Using a trained model to produce output (generate text). No learning happens. | Step 12 (upcoming) |
 | **Temperature** | Controls randomness in generation. Low = predictable, high = creative. | Step 13 (upcoming) |
 | **Overfitting** | When a model memorizes training data instead of learning general patterns. | Step 15 (upcoming) |
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 08.*
+> *This document is updated with each new step. Last updated: Step 09.*
