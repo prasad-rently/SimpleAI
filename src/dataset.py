@@ -43,22 +43,31 @@ THE BIG IDEA:
 
 WHAT THIS FILE PROVIDES:
     1. TextDataset class — a PyTorch Dataset that creates these pairs
-    2. Demo showing example training pairs with numbers and text
+    2. create_dataloader() — wraps the dataset in a DataLoader for batching
+    3. Demos showing training pairs, batch shapes, and shuffling
 
-WHY PyTorch Dataset?
-    PyTorch has a standard way to handle training data: the Dataset class.
+WHY PyTorch Dataset + DataLoader?
+    PyTorch has a two-part system for handling training data:
+    - Dataset:    stores the data and serves individual examples
+    - DataLoader: groups examples into batches, shuffles them, etc.
+
     By following this convention, we get automatic batching, shuffling,
-    and parallel data loading for free (via DataLoader in Step 06).
+    and parallel data loading — the standard approach in all PyTorch projects.
+
+    ANALOGY:
+      Dataset    = a deck of flashcards (one card = one example)
+      DataLoader = a study system that shuffles the deck and hands you
+                   groups of 4 cards at a time (one batch = 4 cards)
 
 INPUT:  data/input.txt (via Vocabulary from Step 04)
-OUTPUT: Training pairs of (input_sequence, target_sequence) as tensors
+OUTPUT: Batched training pairs ready for the model to consume
 
 Usage:
     python src/dataset.py
 """
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 
 # Import our Vocabulary class from Step 04.
 # This lets us reuse the encode/decode functionality.
@@ -364,9 +373,315 @@ def demonstrate_data_shapes(dataset):
     print()
 
 
+def create_dataloader(dataset, batch_size=16, shuffle=True):
+    """
+    Wrap a TextDataset in a PyTorch DataLoader for batched training.
+
+    WHAT IS A DataLoader?
+        A DataLoader takes a Dataset and adds superpowers:
+        1. BATCHING  — groups examples together (e.g., 16 at a time)
+        2. SHUFFLING — randomizes the order each epoch
+        3. PARALLEL  — can load data in background threads
+
+        Think of it as a conveyor belt in a factory:
+        - The Dataset is the warehouse of parts (individual examples)
+        - The DataLoader is the conveyor belt that delivers parts to
+          the assembly line (the model) in organized groups (batches)
+
+    WHY BATCHES?
+        Processing one example at a time is like washing dishes one by
+        one under the tap. Batching is like loading the dishwasher —
+        you process many at once, which is MUCH more efficient.
+
+        Technical reasons:
+        1. HARDWARE EFFICIENCY: CPUs and GPUs are designed to do math
+           on many numbers simultaneously (SIMD/parallel processing).
+           Batching lets us use this capability.
+        2. STABLE GRADIENTS: Averaging the loss over a batch gives a
+           smoother learning signal than any single example.
+        3. SPEED: One batch of 16 is faster than 16 individual passes
+           because of reduced overhead (function calls, memory access).
+
+    WHY SHUFFLE?
+        If the model always sees examples in the same order, it might
+        "memorize" the order instead of learning general patterns.
+        Shuffling ensures each epoch presents examples in a different
+        random order, which leads to better learning.
+
+        EXAMPLE without shuffle (same order every epoch):
+          Epoch 1: [ex0, ex1, ex2, ex3, ex4, ...]
+          Epoch 2: [ex0, ex1, ex2, ex3, ex4, ...]  ← same!
+
+        With shuffle (random order each epoch):
+          Epoch 1: [ex3, ex0, ex4, ex1, ex2, ...]
+          Epoch 2: [ex1, ex4, ex2, ex0, ex3, ...]  ← different!
+
+    PARAMETERS:
+        dataset (TextDataset): The dataset to batch
+        batch_size (int):      How many examples per batch (default: 16)
+                               Common values: 8, 16, 32, 64
+                               Larger = faster but uses more memory
+        shuffle (bool):        Whether to randomize order (default: True)
+                               Always True for training, False for evaluation
+
+    RETURNS:
+        DataLoader: An iterable that yields batches of (input, target) tensors.
+                    Each batch has shape (batch_size, seq_length).
+
+    EXAMPLE:
+        >>> loader = create_dataloader(dataset, batch_size=4)
+        >>> for batch_inputs, batch_targets in loader:
+        ...     print(batch_inputs.shape)  # torch.Size([4, 50])
+        ...     break
+        >>>
+        >>> # 4 examples per batch, each 50 chars long
+        >>> # Total batches: 124 examples ÷ 4 per batch = 31 batches
+
+    HOW IT'S USED IN THE PROJECT:
+        In train.py (Step 09), the training loop iterates over the DataLoader:
+
+        for epoch in range(num_epochs):
+            for batch_inputs, batch_targets in dataloader:
+                # Process the batch through the model
+                # Compute loss, backpropagate, update weights
+                pass
+    """
+
+    # ---- Create the DataLoader ----
+    # DataLoader wraps our Dataset and handles batching + shuffling.
+    #
+    # drop_last=True: If the last batch has fewer than batch_size examples
+    # (because the total doesn't divide evenly), drop it. This keeps all
+    # batches the same size, which simplifies the training code.
+    #
+    # EXAMPLE: 124 examples ÷ 16 per batch = 7 full batches + 12 leftover
+    #   drop_last=True:  7 batches (the 12 leftovers are dropped)
+    #   drop_last=False: 8 batches (last batch has only 12 examples)
+    #
+    # Dropping the last partial batch is standard practice because:
+    # - Some model operations expect a fixed batch size
+    # - The dropped examples still get used when shuffle=True
+    #   (they'll likely be in a different position next epoch)
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=True,
+    )
+
+    return dataloader
+
+
+def demonstrate_batching(dataloader, vocab, dataset):
+    """
+    Show how the DataLoader groups examples into batches.
+
+    Visualizes the shape transformation from individual examples
+    to stacked batches, and shows what a batch looks like in both
+    numbers and text.
+
+    PARAMETERS:
+        dataloader (DataLoader): The DataLoader to demonstrate
+        vocab (Vocabulary):      For decoding numbers back to text
+        dataset (TextDataset):   For reference info (seq_length, etc.)
+
+    OUTPUT: Printed batch shapes, contents, and explanation.
+    """
+
+    print("=" * 60)
+    print("BATCHING: Grouping examples for efficient training")
+    print("=" * 60)
+    print()
+
+    # ---- Batch configuration ----
+    batch_size = dataloader.batch_size
+    num_batches = len(dataloader)
+
+    print(f"  Batch size     : {batch_size} examples per batch")
+    print(f"  Total examples : {len(dataset)}")
+    print(f"  Total batches  : {num_batches}")
+    print(f"  Examples used  : {num_batches * batch_size} "
+          f"({len(dataset) - num_batches * batch_size} dropped from last partial batch)")
+    print()
+
+    # ---- Shape transformation ----
+    # Before batching (individual examples):
+    #   input:  shape (50,)     ← one sequence of 50 characters
+    #   target: shape (50,)
+    #
+    # After batching (grouped examples):
+    #   input:  shape (16, 50)  ← 16 sequences of 50 characters each
+    #   target: shape (16, 50)
+    #
+    # The new first dimension is the BATCH dimension.
+    # batch_inputs[0] is the first example, batch_inputs[1] is the second, etc.
+
+    print("  SHAPE TRANSFORMATION:")
+    print(f"  ┌─────────────────────────────────────────────────────┐")
+    print(f"  │ Before batching (one example):                      │")
+    print(f"  │   input  shape: ({dataset.seq_length},)             │")
+    print(f"  │   target shape: ({dataset.seq_length},)             │")
+    print(f"  │                                                     │")
+    print(f"  │ After batching ({batch_size} examples stacked):     │")
+    print(f"  │   input  shape: ({batch_size}, {dataset.seq_length})"
+          f"                    │")
+    print(f"  │   target shape: ({batch_size}, {dataset.seq_length})"
+          f"                    │")
+    print(f"  │                  ↑    ↑                             │")
+    print(f"  │            batch_dim  seq_dim                       │")
+    print(f"  └─────────────────────────────────────────────────────┘")
+    print()
+
+    # ---- Grab and inspect the first batch ----
+    # iter() creates an iterator from the DataLoader.
+    # next() gets the first item from that iterator.
+    # This is equivalent to doing one step of a for-loop.
+    batch_inputs, batch_targets = next(iter(dataloader))
+
+    print(f"  First batch (actual tensors):")
+    print(f"    batch_inputs  shape: {batch_inputs.shape}  dtype: {batch_inputs.dtype}")
+    print(f"    batch_targets shape: {batch_targets.shape}  dtype: {batch_targets.dtype}")
+    print()
+
+    # ---- Show a few examples from the batch ----
+    # Decode the first 3 examples to show what text is in this batch.
+    print(f"  First 3 examples in this batch:")
+    for i in range(min(3, batch_size)):
+        input_text = vocab.decode(batch_inputs[i].tolist())
+        # Show first 40 chars for readability
+        preview = input_text[:40] + "..." if len(input_text) > 40 else input_text
+        print(f"    [{i}] \"{preview}\"")
+    print()
+
+    # ---- Explain how indexing works ----
+    print("  HOW TO ACCESS BATCH DATA:")
+    print(f"    batch_inputs[0]    → first example in batch   shape: ({dataset.seq_length},)")
+    print(f"    batch_inputs[0][0] → first char of first ex   value: {batch_inputs[0][0].item()}"
+          f" = '{vocab.idx_to_char[batch_inputs[0][0].item()]}'")
+    print(f"    batch_inputs[:, 0] → first char of ALL examples  shape: ({batch_size},)")
+    print()
+
+
+def demonstrate_shuffling(dataset, vocab):
+    """
+    Show that shuffling randomizes the batch order each epoch.
+
+    Creates two DataLoaders from the same dataset — one shuffled,
+    one not — and compares the first batch from each.
+
+    PARAMETERS:
+        dataset (TextDataset): The dataset to demonstrate with
+        vocab (Vocabulary):    For decoding numbers back to text
+
+    OUTPUT: Printed comparison showing shuffled vs unshuffled batches.
+    """
+
+    print("=" * 60)
+    print("SHUFFLING: Why random order helps learning")
+    print("=" * 60)
+    print()
+
+    # ---- Without shuffling ----
+    # Same order every time — the first batch always contains the
+    # same examples (the first 4 in the dataset).
+    loader_no_shuffle = DataLoader(dataset, batch_size=4, shuffle=False)
+
+    batch1_inputs, _ = next(iter(loader_no_shuffle))
+    batch1_again, _ = next(iter(loader_no_shuffle))
+
+    text1 = vocab.decode(batch1_inputs[0].tolist())[:40]
+    text1_again = vocab.decode(batch1_again[0].tolist())[:40]
+
+    print("  WITHOUT shuffle (shuffle=False):")
+    print(f"    First call, batch[0]: \"{text1}...\"")
+    print(f"    Second call, batch[0]: \"{text1_again}...\"")
+    print(f"    Same? {text1 == text1_again} ← always the same order")
+    print()
+
+    # ---- With shuffling ----
+    # Different order each time — the first batch will contain
+    # different examples on each pass.
+    loader_shuffled_1 = DataLoader(dataset, batch_size=4, shuffle=True)
+    loader_shuffled_2 = DataLoader(dataset, batch_size=4, shuffle=True)
+
+    batch_s1, _ = next(iter(loader_shuffled_1))
+    batch_s2, _ = next(iter(loader_shuffled_2))
+
+    text_s1 = vocab.decode(batch_s1[0].tolist())[:40]
+    text_s2 = vocab.decode(batch_s2[0].tolist())[:40]
+
+    print("  WITH shuffle (shuffle=True):")
+    print(f"    First loader, batch[0]:  \"{text_s1}...\"")
+    print(f"    Second loader, batch[0]: \"{text_s2}...\"")
+    print(f"    Same? {text_s1 == text_s2} ← different order (usually)")
+    print()
+    print("  Shuffling prevents the model from memorizing the ORDER of")
+    print("  examples. It must learn PATTERNS, not sequences of batches.")
+    print()
+
+
+def demonstrate_full_epoch(dataloader):
+    """
+    Iterate through ALL batches to show what one full epoch looks like.
+
+    In training, one "epoch" = processing every batch exactly once.
+    This demo counts the batches and total examples seen.
+
+    PARAMETERS:
+        dataloader (DataLoader): The DataLoader to iterate through
+
+    OUTPUT: Printed batch count and epoch summary.
+    """
+
+    print("=" * 60)
+    print("ONE FULL EPOCH: Iterating through all batches")
+    print("=" * 60)
+    print()
+
+    # ---- Iterate through all batches ----
+    # This is EXACTLY what the training loop does (Step 09).
+    # The only difference is that during training, we also compute
+    # the loss and update the model's weights for each batch.
+
+    total_examples_seen = 0
+    batch_count = 0
+
+    for batch_idx, (batch_inputs, batch_targets) in enumerate(dataloader):
+        batch_count += 1
+        total_examples_seen += batch_inputs.shape[0]
+
+        # Show the first 3 and last batch
+        if batch_idx < 3 or batch_idx == len(dataloader) - 1:
+            print(f"  Batch {batch_idx:3d}: "
+                  f"input shape {tuple(batch_inputs.shape)}, "
+                  f"target shape {tuple(batch_targets.shape)}")
+
+        if batch_idx == 3:
+            print(f"  ... ({len(dataloader) - 4} more batches) ...")
+
+    print()
+    print(f"  Epoch complete!")
+    print(f"    Batches processed   : {batch_count}")
+    print(f"    Examples seen       : {total_examples_seen}")
+    print(f"    Batch size          : {dataloader.batch_size}")
+    print()
+
+    # ---- This is the training loop skeleton ----
+    print("  IN TRAINING (Step 09), each batch will be processed like:")
+    print("  ┌─────────────────────────────────────────────────────┐")
+    print("  │  for batch_inputs, batch_targets in dataloader:     │")
+    print("  │      predictions = model(batch_inputs)   # forward  │")
+    print("  │      loss = loss_fn(predictions, targets) # score   │")
+    print("  │      loss.backward()                      # grads   │")
+    print("  │      optimizer.step()                     # update  │")
+    print("  └─────────────────────────────────────────────────────┘")
+    print()
+
+
 def main():
     """
-    Main function — builds the dataset and runs all demonstrations.
+    Main function — builds dataset + dataloader and runs all demonstrations.
 
     FLOW:
         1. Load data/input.txt
@@ -374,7 +689,10 @@ def main():
         3. Create TextDataset (chop text into training pairs)
         4. Show example training pairs (text + numbers)
         5. Show tensor shapes (what PyTorch sees)
-        6. Preview what comes next (Step 06: batching)
+        6. Create DataLoader (group examples into batches)
+        7. Show batch shapes and contents
+        8. Show shuffling effect
+        9. Walk through one full epoch
     """
 
     # ---- Load the training text ----
@@ -386,7 +704,7 @@ def main():
     vocab = Vocabulary(text)
 
     print("=" * 60)
-    print("STEP 05: TRAINING SEQUENCES")
+    print("STEP 05-06: TRAINING SEQUENCES + BATCHING")
     print("=" * 60)
     print()
     print(f"Text file       : {filepath}")
@@ -412,31 +730,51 @@ def main():
           f"= {len(dataset)} examples)")
     print()
 
-    # ---- Run demonstrations ----
-    demonstrate_training_pairs(dataset, vocab, num_examples=3)
+    # ---- Run Step 05 demonstrations ----
+    demonstrate_training_pairs(dataset, vocab, num_examples=2)
     demonstrate_data_shapes(dataset)
+
+    # ---- Create the DataLoader (Step 06) ----
+    # batch_size=16 means the model sees 16 examples at once.
+    #
+    # WHY 16?
+    #   - Small enough to fit in memory on any machine
+    #   - Large enough to give stable gradient estimates
+    #   - Common starting point; can be tuned later
+    #
+    # COMMON BATCH SIZES AND TRADE-OFFS:
+    #   batch_size=1:   Very noisy gradients, slow training
+    #   batch_size=16:  Good balance of speed and stability (our choice)
+    #   batch_size=32:  Faster, slightly less noise
+    #   batch_size=128: Very fast, but needs more memory
+    #   batch_size=4096: What large companies use with big GPUs
+    batch_size = 16
+    dataloader = create_dataloader(dataset, batch_size=batch_size, shuffle=True)
+
+    print(f"DataLoader created: batch_size={batch_size}, shuffle=True")
+    print(f"  Batches per epoch: {len(dataloader)}")
+    print()
+
+    # ---- Run Step 06 demonstrations ----
+    demonstrate_batching(dataloader, vocab, dataset)
+    demonstrate_shuffling(dataset, vocab)
+    demonstrate_full_epoch(dataloader)
 
     # ---- What comes next ----
     print("=" * 60)
-    print("WHAT COMES NEXT (Step 06)")
+    print("WHAT COMES NEXT (Step 07)")
     print("=" * 60)
     print("""
-Right now, the model would see examples ONE AT A TIME:
-  dataset[0] → first example
-  dataset[1] → second example
-  ...
+Now we have data flowing in organized batches. Next, we build
+the NEURAL NETWORK itself — the model that will learn to predict
+the next character.
 
-This is slow! In Step 06, we'll use a DataLoader to group
-examples into BATCHES:
+The model will have three layers:
+  1. EMBEDDING  — converts character numbers into rich vectors
+  2. RNN        — processes the sequence and builds up context
+  3. OUTPUT     — predicts probabilities for the next character
 
-  Batch 1: [example 0, example 1, example 2, example 3]  ← 4 at once
-  Batch 2: [example 4, example 5, example 6, example 7]
-  ...
-
-Processing examples in batches is MUCH faster because:
-  - GPUs/CPUs can do math on many examples simultaneously
-  - The model updates its weights once per batch, not once per example
-  - It's more stable (averages out noise from individual examples)
+This is where the magic happens!
 """)
 
 
