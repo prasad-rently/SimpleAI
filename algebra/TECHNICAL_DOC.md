@@ -229,26 +229,32 @@ Characters used (16): [' ', '+', '-', '/', '0'-'9', '=', 'x']
 ```
 Tab is used as delimiter because equations contain spaces.
 
-### Vocabulary (Step 03)
+### Vocabulary (Step 03) — `algebra/src/vocab.py`
 
-**Token → Index mapping:**
+**Token → Index mapping (confirmed from implementation):**
 
 | Token | Index | Purpose |
 |---|---|---|
-| `<PAD>` | 0 | Padding |
-| `<SOS>` | 1 | Start of sequence |
-| `<EOS>` | 2 | End of sequence |
-| `0`-`9` | 3-12 | Digits |
-| `x` | 13 | Variable |
-| `+` | 14 | Addition |
-| `-` | 15 | Subtraction / negative sign |
-| `*` | 16 | Multiplication |
-| `/` | 17 | Division |
-| `=` | 18 | Equals |
-| `.` | 19 | Decimal point |
-| ` ` | 20 | Space |
+| `<PAD>` | 0 | Padding (ignored in loss) |
+| `<SOS>` | 1 | Start of sequence (decoder input) |
+| `<EOS>` | 2 | End of sequence (stop signal) |
+| ` ` (space) | 3 | Space between terms |
+| `+` | 4 | Addition |
+| `-` | 5 | Subtraction / negative sign |
+| `/` | 6 | Division |
+| `0`-`9` | 7-16 | Digits |
+| `=` | 17 | Equals sign |
+| `x` | 18 | Variable |
 
-*(Exact indices will be confirmed during implementation)*
+**Total: 19 tokens** (3 special + 16 data characters)
+
+Note: `*` (multiplication) and `.` (decimal point) are in the token list in REQUIREMENTS.md but don't appear in the current dataset — our answer-first strategy produces only integer answers, and equations use implicit multiplication (`2x` not `2*x`). They'll be added if needed for future equation types.
+
+**Key methods:**
+- `encode("2x + 3 = 7")` → `[9, 18, 3, 4, 3, 10, 3, 17, 3, 14]`
+- `encode_with_eos("x = 2")` → `[18, 3, 17, 3, 9, 2]` (appends EOS)
+- `decode([18, 3, 17, 3, 9])` → `"x = 2"` (skips special tokens)
+- `decode_until_eos([18, 3, 17, 3, 9, 2, 9, 9])` → `"x = 2"` (stops at EOS)
 
 ### Dataset (Step 04)
 
@@ -439,4 +445,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 02 (data generation).*
+*This document is updated with each step. Last updated: Step 03 (vocabulary).*
