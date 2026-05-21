@@ -17,6 +17,7 @@
   - [Step 01 — Project Skeleton](#step-01--project-skeleton)
   - [Step 02 — Verify PyTorch](#step-02--verify-pytorch)
   - [Step 03 — Training Data](#step-03--training-data)
+  - [Step 04 — Character Vocabulary](#step-04--character-vocabulary)
 - [Glossary](#glossary)
 
 ---
@@ -351,6 +352,115 @@ main()
 
 ---
 
+#### `src/vocabulary.py`
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Convert text to numbers and back (tokenization) |
+| **Created in** | Step 04 |
+| **Run with** | `python src/vocabulary.py` |
+| **Input** | Reads `data/input.txt` to build vocabulary |
+| **Output** | Printed demos — encoding, decoding, vocabulary table, round-trip proof |
+| **Imported by** | `dataset.py` (Step 05), `train.py` (Step 09), `generate.py` (Step 12) |
+
+**Classes:**
+
+| Class | Description |
+|-------|-------------|
+| `Vocabulary` | Builds and stores two-way character↔number mappings from training text |
+
+**Vocabulary class — Methods:**
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `__init__(text)` | `text` (str): full training text | None (sets up instance) | Builds char↔number mappings from all unique characters in the text |
+| `encode(text)` | `text` (str): any text to encode | `list[int]`: number per character | Converts text → numbers using `char_to_idx` dictionary |
+| `decode(indices)` | `indices` (list[int]): numbers to decode | `str`: the decoded text | Converts numbers → text using `idx_to_char` dictionary |
+
+**Vocabulary class — Attributes:**
+
+| Attribute | Type | Description | Example value |
+|-----------|------|-------------|---------------|
+| `chars` | `list[str]` | Sorted list of all unique characters | `['\n', ' ', ',', '.', ':', 'A', ...]` |
+| `vocab_size` | `int` | Total number of unique characters | `48` |
+| `char_to_idx` | `dict[str, int]` | Character → number mapping | `{'a': 22, 'b': 23, ...}` |
+| `idx_to_char` | `dict[int, str]` | Number → character mapping | `{22: 'a', 23: 'b', ...}` |
+
+**Standalone functions:**
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `demonstrate_encoding(vocab)` | `vocab` (Vocabulary) | Prints step-by-step encoding examples with character-by-character breakdown |
+| `demonstrate_decoding(vocab)` | `vocab` (Vocabulary) | Prints step-by-step decoding examples and a full round-trip proof |
+| `demonstrate_vocabulary_details(vocab)` | `vocab` (Vocabulary) | Prints the complete 48-character mapping table and observations |
+| `main()` | None | Loads training text, builds Vocabulary, runs all three demos |
+
+**Detailed Flow:**
+
+```
+main()
+  │
+  ├── Load data/input.txt → text string (6201 chars)
+  │
+  ├── Build Vocabulary(text)
+  │   │
+  │   ├── set(text) → find 48 unique characters
+  │   │   INPUT:  "The only way..." (6201 chars)
+  │   │   OUTPUT: {'T', 'h', 'e', ' ', 'o', 'n', ...} (48 unique)
+  │   │
+  │   ├── sorted() → alphabetical order
+  │   │   OUTPUT: ['\n', ' ', ',', '.', ':', 'A', 'B', ...]
+  │   │
+  │   ├── Build char_to_idx
+  │   │   OUTPUT: {'\n': 0, ' ': 1, ',': 2, '.': 3, ..., 'z': 47}
+  │   │
+  │   └── Build idx_to_char
+  │       OUTPUT: {0: '\n', 1: ' ', 2: ',', 3: '.', ..., 47: 'z'}
+  │
+  ├── demonstrate_encoding(vocab)
+  │   │
+  │   ├── encode("The")
+  │   │   'T' → char_to_idx['T'] → 19
+  │   │   'h' → char_to_idx['h'] → 29
+  │   │   'e' → char_to_idx['e'] → 26
+  │   │   OUTPUT: [19, 29, 26]
+  │   │
+  │   ├── encode("Life is short.")
+  │   │   OUTPUT: [14, 30, 27, 26, 1, 30, 40, 1, 40, 29, 36, 39, 41, 3]
+  │   │   (spaces → 1, period → 3, each letter → its number)
+  │   │
+  │   └── Determinism proof: encode("the") twice → same result both times
+  │
+  ├── demonstrate_decoding(vocab)
+  │   │
+  │   ├── decode([19, 29, 26])
+  │   │   19 → idx_to_char[19] → 'T'
+  │   │   29 → idx_to_char[29] → 'h'
+  │   │   26 → idx_to_char[26] → 'e'
+  │   │   OUTPUT: "The"
+  │   │
+  │   └── Round-trip proof:
+  │       "Dream big." → encode → [8,39,26,22,34,1,23,30,28,3] → decode → "Dream big."
+  │       Original == Decoded? True ← no information lost
+  │
+  └── demonstrate_vocabulary_details(vocab)
+      ├── Print all 48 mappings in table format
+      └── Key insight: model output layer will have 48 neurons
+```
+
+**Key concepts introduced:**
+
+| Concept | Explanation | Example |
+|---------|-------------|---------|
+| **Tokenization** | Converting text into numbers so a neural network can process it | `"The"` → `[19, 29, 26]` |
+| **Encoding** | Text → numbers direction. Used before feeding text to the model | `vocab.encode("hi")` → `[29, 30]` |
+| **Decoding** | Numbers → text direction. Used after model produces output | `vocab.decode([29, 30])` → `"hi"` |
+| **char_to_idx** | Dictionary mapping each character to its unique number | `{'a': 22, 'b': 23, 'e': 26, ...}` |
+| **idx_to_char** | Reverse dictionary mapping each number back to its character | `{22: 'a', 23: 'b', 26: 'e', ...}` |
+| **Deterministic** | Same input always produces same output — crucial for reproducibility | `encode("the")` always returns `[41, 29, 26]` |
+
+---
+
 ### Data Files
 
 #### `data/input.txt`
@@ -454,6 +564,44 @@ data/input.txt ──(read by)──▶ explore_data.py ──(prints)──▶ 
 
 ---
 
+### Step 04 — Character Vocabulary
+
+**What was built:** A `Vocabulary` class that converts text to numbers and back.
+
+**Why it matters:** Neural networks only understand numbers. Before any text can enter the model, it must be converted to numbers (encoding). After the model produces number outputs, they must be converted back to text (decoding). This is the bridge between human-readable text and machine-processable numbers.
+
+```
+What changed:
+  + src/vocabulary.py   ← Vocabulary class + encoding/decoding demos
+
+Run:
+  python src/vocabulary.py
+
+Expected output:
+  Encoding demos ("The" → [19, 29, 26]), decoding demos, round-trip proof,
+  complete 48-character vocabulary table
+```
+
+**Key takeaway:** Tokenization is lossless — `decode(encode(text)) == text`. The model works entirely with numbers internally; we only convert back to text at the very end.
+
+**The flow so far:**
+
+```
+data/input.txt ──(read by)──▶ explore_data.py ──(prints)──▶ statistics
+       │
+       └──────(read by)──▶ vocabulary.py
+                              │
+                              ├── Vocabulary class
+                              │     .char_to_idx  {'T': 19, 'h': 29, ...}
+                              │     .idx_to_char  {19: 'T', 29: 'h', ...}
+                              │     .encode()     "The" → [19, 29, 26]
+                              │     .decode()     [19, 29, 26] → "The"
+                              │
+                              └── (imported by dataset.py in Step 05)
+```
+
+---
+
 ## Glossary
 
 Terms are listed in the order you'll encounter them, not alphabetically.
@@ -471,7 +619,12 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 | **Dataset** | The collection of text (or other data) that a model learns from. | Step 03 |
 | **Vocabulary** | The set of all unique tokens (characters, in our case) that the model knows about. | Step 03 |
 | **Character frequency** | How often each character appears in the data. Affects how well the model learns each character. | Step 03 |
-| **Tokenization** | Converting text into numbers. We'll map each character to a unique integer. | Step 04 (upcoming) |
+| **Tokenization** | Converting text into numbers. Each character is mapped to a unique integer. | Step 04 |
+| **Encoding** | The text → numbers direction of tokenization. `"The"` becomes `[19, 29, 26]`. | Step 04 |
+| **Decoding** | The numbers → text direction. `[19, 29, 26]` becomes `"The"`. | Step 04 |
+| **char_to_idx** | Dictionary that maps each character to its number. The encoding lookup table. | Step 04 |
+| **idx_to_char** | Reverse dictionary that maps each number back to its character. The decoding lookup table. | Step 04 |
+| **Deterministic** | Same input always gives same output. Important for reproducibility in AI. | Step 04 |
 | **Embedding** | Converting a token number into a rich vector of floats that captures meaning. | Step 07 (upcoming) |
 | **Loss** | A number that measures how wrong the model's predictions are. Lower = better. | Step 08 (upcoming) |
 | **Epoch** | One complete pass through the entire training dataset. | Step 09 (upcoming) |
@@ -484,4 +637,4 @@ Terms are listed in the order you'll encounter them, not alphabetically.
 
 ---
 
-> *This document is updated with each new step. Last updated: Step 03.*
+> *This document is updated with each new step. Last updated: Step 04.*
