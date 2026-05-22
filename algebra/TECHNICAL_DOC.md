@@ -412,9 +412,46 @@ Run 3: 50 epochs, LR=0.002, StepLR       → 94.6%  ← final (target met!)
 
 ---
 
-## Inference Pipeline
+## Evaluation Results
 
-*(Updated when Step 09 is implemented)*
+### Overall Accuracy
+```
+Overall accuracy: 94.6% (9,458 / 10,000)    ← TARGET MET (≥ 90%)
+```
+
+### Per-Type Accuracy
+```
+Type 1: ax = b              99.4%  (693/697)    ✓ ≥ 80%
+Type 2: ax + b = c           97.8%  (2120/2167)  ✓ ≥ 80%
+Type 3: ax - b = c           97.1%  (1887/1943)  ✓ ≥ 80%
+Type 4: b + ax = c           98.3%  (1360/1383)  ✓ ≥ 80%
+Type 5: b - ax = c           97.7%  (1311/1342)  ✓ ≥ 80%
+Type 6: x / a = b            65.9%  (203/308)    ✗ below 80%
+Type 7: ax + b = cx + d      87.2%  (1884/2160)  ✓ ≥ 80%
+```
+
+### By Answer Sign
+```
+Positive answers:  94.7%  (4639/4901)
+Negative answers:  94.5%  (4686/4960)
+Zero answers:      95.7%  (133/139)
+```
+
+### Known Limitation: Type 6 (Division)
+Type 6 (x / a = b) achieves only 65.9% accuracy. This is because:
+1. **Few training examples**: only 1,602 out of 50,000 (3.2%)
+2. **Large answers**: x = a × b can reach 280+, making character prediction harder
+3. **Multiplication is harder**: the model must learn to multiply (reverse the division), which produces multi-digit numbers it hasn't seen enough
+
+### Substitution Verification
+100% of correct predictions were verified by plugging the answer back into the equation.
+
+### Error Patterns
+Most errors are small numeric mistakes (off-by-one or off-by-a-few), not garbled output. The model understands the format perfectly — it just sometimes gets the exact digit wrong.
+
+---
+
+## Inference Pipeline
 
 ### Greedy Decoding
 
@@ -499,4 +536,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 08 (training loop).*
+*This document is updated with each step. Last updated: Step 09 (evaluation).*
