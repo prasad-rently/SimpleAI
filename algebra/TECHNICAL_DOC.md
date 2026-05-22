@@ -256,18 +256,42 @@ Note: `*` (multiplication) and `.` (decimal point) are in the token list in REQU
 - `decode([18, 3, 17, 3, 9])` → `"x = 2"` (skips special tokens)
 - `decode_until_eos([18, 3, 17, 3, 9, 2, 9, 9])` → `"x = 2"` (stops at EOS)
 
-### Dataset (Step 04)
+### Dataset (Step 04) — `algebra/src/dataset.py`
 
-**Encoding an equation-solution pair:**
+**Three tensors per example:**
+
+Each equation-solution pair produces three tensors for the model:
 
 ```
-Equation: "2x + 3 = 7"
-Solution: "x = 2"
+Equation: "17x - 14 = -660"    Solution: "x = -38"
 
-Encoder input:  [2, x, +, 3, =, 7, <EOS>, <PAD>, <PAD>]  ← padded to max length
-Decoder input:  [<SOS>, x, =, 2]                           ← starts with <SOS>
-Decoder target: [x, =, 2, <EOS>]                           ← shifted by 1, ends with <EOS>
+Encoder input:  [8,14,18,3,5,3,8,11,3,17,3,5,13,13,7, 2, 0,0,0,0,0,0,0]
+                 1  7  x    -    1  4     =    -  6  6  0 EOS  ← padding →
+
+Decoder input:  [1, 18,3,17,3,5,10,15]
+                SOS  x    =    -  3  8
+
+Decoder target: [18,3,17,3,5,10,15, 2]
+                  x    =    -  3  8 EOS
 ```
+
+The decoder input/target are offset by 1: at each step the decoder receives a token and must predict the next.
+
+**Train/test split:**
+- 40,000 training pairs (80%), 10,000 test pairs (20%)
+- Shuffled with fixed seed=42 for reproducibility
+- 0 overlap verified (no data leakage)
+
+**Batch shapes (batch_size=64):**
+- Encoder input: `(64, max_eq_len)` — padded to longest equation in batch
+- Decoder input: `(64, max_sol_len)` — padded to longest solution in batch
+- Decoder target: `(64, max_sol_len)` — same shape as decoder input
+
+**Collate function:** Custom `collate_fn()` uses `pad_sequence(padding_value=PAD_IDX)` to handle variable-length sequences within each batch.
+
+**DataLoader config:**
+- Train: `shuffle=True, drop_last=True` → 625 batches
+- Test: `shuffle=False, drop_last=False` → 157 batches
 
 ---
 
@@ -445,4 +469,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 03 (vocabulary).*
+*This document is updated with each step. Last updated: Step 04 (dataset).*
