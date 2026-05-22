@@ -297,53 +297,61 @@ The decoder input/target are offset by 1: at each step the decoder receives a to
 
 ## Model Architecture
 
-*(Updated as steps are implemented)*
-
-### Encoder (Step 05)
+### Encoder (Step 05) — `algebra/src/encoder.py`
 
 ```
 Encoder(
-  embedding:  Embedding(~23, 64)       ← character → 64-dim vector
-  gru:        GRU(64, 128, 2 layers, bidirectional=True)
-  fc_hidden:  Linear(256, 256)         ← bridge: encoder hidden → decoder hidden
+  embedding:  Embedding(19, 64, padding_idx=0)
+  gru:        GRU(64, 128, num_layers=2, bidirectional=True, dropout=0.1)
+  fc_hidden:  Linear(256, 256)         ← bridge to decoder hidden size
 )
-
-Parameter estimate:
-  Embedding:    23 × 64     =   1,472
-  GRU Layer 1:  (forward + backward) ≈ 148,000
-  GRU Layer 2:  (forward + backward) ≈ 394,000
-  Bridge FC:    256 × 256   =  65,536
-  Total:        ~609,000 parameters
+Total: 512,448 parameters
 ```
 
-### Decoder (Step 06)
+**Key design choices:**
+- `padding_idx=0`: PAD tokens produce zero vectors (no contribution)
+- Bidirectional: reads equation left→right AND right→left
+- Hidden bridge: reshapes bidirectional output (2×128=256) for unidirectional decoder
+- `tanh` activation on bridge to bound values to [-1, 1]
+
+**Output:** `(batch, seq_len, 256)` per-position context + `(2, batch, 256)` final hidden
+
+### Decoder (Step 06) — `algebra/src/decoder.py`
 
 ```
 Decoder(
-  embedding:    Embedding(~23, 64)     ← character → 64-dim vector
-  gru:          GRU(64, 256, 2 layers)
-  output_layer: Linear(256, ~23)       ← hidden → character scores
+  embedding:    Embedding(19, 64, padding_idx=0)
+  gru:          GRU(64, 256, num_layers=2, dropout=0.1)
+  output_layer: Linear(256, 19)
 )
-
-Parameter estimate:
-  Embedding:    23 × 64     =   1,472
-  GRU Layer 1:              ≈ 247,000
-  GRU Layer 2:              ≈ 394,000
-  Output:       256 × 23    =   5,888
-  Total:        ~648,000 parameters
+Total: 648,147 parameters
 ```
 
-### Seq2Seq Combined (Step 07)
+**Key design choices:**
+- Unidirectional (left→right only — can't peek at future tokens)
+- `hidden_size=256` matches encoder's bidirectional output (128×2)
+- Teacher forcing ratio configurable per call (1.0 → 0.5 during training)
+- `max_length=20` safety limit during inference
+
+**Two modes:**
+- Training: `forward(hidden, target, tf_ratio)` → logits `(batch, target_len, 19)`
+- Inference: `generate(hidden)` → predictions `(batch, max_length)`
+
+### Seq2Seq Combined (Step 07) — `algebra/src/seq2seq.py`
 
 ```
 Seq2Seq(
-  encoder: Encoder(...)    ← ~609K params
-  decoder: Decoder(...)    ← ~648K params
+  encoder: Encoder(512,448 params)
+  decoder: Decoder(648,147 params)
 )
-Total: ~1.26M parameters
-
-(~5× larger than the text generator's 248K, because the task is harder)
+Total: 1,160,595 parameters (~4.7× the text generator's 248K)
 ```
+
+**Gradient verification:** Loss backpropagates through both decoder AND encoder — both networks learn simultaneously.
+
+**Interface:**
+- `model(src, target, tf_ratio)` → training (returns logits)
+- `model.solve(src)` → inference (returns predicted indices)
 
 ---
 
@@ -469,4 +477,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 04 (dataset).*
+*This document is updated with each step. Last updated: Step 07 (seq2seq model).*
