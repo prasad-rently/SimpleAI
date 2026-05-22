@@ -168,21 +168,66 @@ We gradually reduce teacher forcing during training so the model learns to use i
 
 ## Data Pipeline
 
-*(Updated as steps are implemented)*
+### Data Generation (Step 02) — `algebra/src/generate_data.py`
 
-### Data Generation (Step 02)
+**Key insight — answer-first generation:**
+Instead of generating random equations and solving them (which produces ugly decimals), we generate the **answer first** and work backwards to create a clean equation. This guarantees integer answers every time.
+
+```
+Traditional approach (messy):
+  Generate a=3, b=10  →  3x = 10  →  x = 3.333...  ← ugly
+
+Our approach (clean):
+  Generate a=3, x=4   →  b = 3×4 = 12  →  "3x = 12"  →  "x = 4"  ← clean
+```
 
 **Equation types and generation strategy:**
 
-| Type | Template | How x is solved | Example |
+| Type | Template | How it's generated | Example |
 |---|---|---|---|
-| `ax = b` | Generate a,b; x = b/a | Division | `3x = 12` → `x = 4` |
-| `ax + b = c` | Generate a,b,c; x = (c-b)/a | Subtract, divide | `2x + 3 = 7` → `x = 2` |
-| `ax - b = c` | Generate a,b,c; x = (c+b)/a | Add, divide | `5x - 10 = 15` → `x = 5` |
-| `b + ax = c` | Generate a,b,c; x = (c-b)/a | Same math, different order | `3 + 4x = 11` → `x = 2` |
-| `b - ax = c` | Generate a,b,c; x = (b-c)/a | Subtract from b | `10 - 2x = 4` → `x = 3` |
-| `x / a = b` | Generate a,b; x = a*b | Multiply | `x / 4 = 3` → `x = 12` |
-| `ax + b = cx + d` | Generate a,b,c,d; x = (d-b)/(a-c) | Collect terms | `3x + 2 = x + 8` → `x = 3` |
+| `ax = b` | Pick a, x_val; b = a×x | `3x = 12` → `x = 4` |
+| `ax + b = c` | Pick a, x_val, b; c = a×x+b | `2x + 3 = 7` → `x = 2` |
+| `ax - b = c` | Pick a, x_val, b; c = a×x-b | `5x - 10 = 15` → `x = 5` |
+| `b + ax = c` | Pick a, x_val, b; c = b+a×x | `3 + 4x = 11` → `x = 2` |
+| `b - ax = c` | Pick a, x_val, b; c = b-a×x | `10 - 2x = 4` → `x = 3` |
+| `x / a = b` | Pick a, b; x = a×b | `x / 4 = 3` → `x = 12` |
+| `ax + b = cx + d` | Pick a, c, x_val, b; d = (a-c)×x+b | `3x + 2 = x + 8` → `x = 3` |
+
+**Dataset statistics (actual output from generation):**
+
+```
+Total equations:  50,000
+Duplicates skipped: 10,620
+
+Type distribution:
+  Type 1 (ax = b)           :  3,357 (6.7%)
+  Type 2 (ax + b = c)       : 10,319 (20.6%)
+  Type 3 (ax - b = c)       : 10,091 (20.2%)
+  Type 4 (b + ax = c)       :  7,008 (14.0%)
+  Type 5 (b - ax = c)       :  6,860 (13.7%)
+  Type 6 (x / a = b)        :  1,602 (3.2%)
+  Type 7 (ax + b = cx + d)  : 10,763 (21.5%)
+
+Answer distribution:
+  Positive: 24,466 (48.9%)
+  Negative: 24,862 (49.7%)
+  Zero:        672 (1.3%)
+
+Sequence lengths:
+  Equation: min=5, max=22, avg=14.5
+  Solution: min=5, max=8,  avg=6.3
+
+Characters used (16): [' ', '+', '-', '/', '0'-'9', '=', 'x']
+```
+
+**Verification:** Every equation is checked by substitution — the x value is plugged back into both sides of the equation, and they must be equal (within 1e-6 tolerance). 0 equations failed verification.
+
+**File format — tab-separated:**
+```
+2x + 3 = 7\tx = 2
+5x - 10 = 15\tx = 5
+```
+Tab is used as delimiter because equations contain spaces.
 
 ### Vocabulary (Step 03)
 
@@ -394,4 +439,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 01 (skeleton).*
+*This document is updated with each step. Last updated: Step 02 (data generation).*
