@@ -357,17 +357,18 @@ Total: 1,160,595 parameters (~4.7× the text generator's 248K)
 
 ## Training Pipeline
 
-*(Updated when Step 08 is implemented)*
-
 ### Configuration
 ```
-Epochs:         30-50
-Batch size:     64
-Learning rate:  0.001
-Optimizer:      Adam
-Loss function:  CrossEntropyLoss(ignore_index=PAD_IDX)
-Teacher forcing: 1.0 → 0.5 (scheduled decrease)
-Gradient clip:  1.0 (prevents exploding gradients)
+Epochs:           50
+Batch size:       64
+Learning rate:    0.002 (initial)
+Optimizer:        Adam
+LR scheduler:    StepLR(step_size=15, gamma=0.5)
+                  → LR halves every 15 epochs: 0.002 → 0.001 → 0.0005
+Loss function:   CrossEntropyLoss(ignore_index=PAD_IDX)
+Teacher forcing:  1.0 → 0.3 (linear decrease over 50 epochs)
+Gradient clip:    1.0 (prevents exploding gradients)
+Training time:   ~15 minutes on CPU
 ```
 
 ### Loss Calculation
@@ -382,14 +383,31 @@ Loss:        ✓   ✓   ✗   ✓     skip   skip
               penalty for predicting "3" instead of "2"
 ```
 
-### Expected Training Curve
+### Training Curve (Actual Results)
 
 ```
-Epoch  1: Loss ~2.8, Accuracy ~5%    (random guessing)
-Epoch  5: Loss ~1.5, Accuracy ~30%   (learning structure "x = ...")
-Epoch 10: Loss ~0.8, Accuracy ~60%   (getting digits right sometimes)
-Epoch 20: Loss ~0.3, Accuracy ~85%   (most equations correct)
-Epoch 30: Loss ~0.1, Accuracy ~93%   (fine-tuning edge cases)
+Epoch 10: Loss 0.1229, Accuracy 68.9%, TF 0.87    (learning structure)
+Epoch 20: Loss 0.0538, Accuracy 85.4%, TF 0.73    (most equations correct)
+Epoch 30: Loss 0.0484, Accuracy 87.7%, TF 0.59    (fine-tuning)
+Epoch 40: Loss 0.0225, Accuracy 92.1%, TF 0.44    (above 90% target!)
+Epoch 50: Loss 0.0098, Accuracy 94.6%, TF 0.30    (final — target exceeded)
+```
+
+### Key Training Decisions
+
+1. **LR Scheduler**: StepLR halves the learning rate every 15 epochs. Early epochs use large steps for fast learning, later epochs use smaller steps for fine-tuning.
+
+2. **Teacher Forcing 1.0 → 0.3**: Starts with full teacher forcing (always feed correct tokens) and gradually forces the model to rely on its own predictions. The linear decrease is more gradual than a step schedule.
+
+3. **Gradient Clipping at 1.0**: RNNs can produce very large gradients during backpropagation (exploding gradients). Clipping caps the total gradient norm, keeping weight updates stable.
+
+### Training History
+
+Previous runs that informed the final configuration:
+```
+Run 1: 30 epochs, LR=0.001, TF 1.0→0.5  → 73.8%  (TF dropped too fast)
+Run 2: 50 epochs, LR=0.001, TF 1.0→0.3  → 83.8%  (LR too low for later epochs)
+Run 3: 50 epochs, LR=0.002, StepLR       → 94.6%  ← final (target met!)
 ```
 
 ---
@@ -474,7 +492,11 @@ New terms introduced in this project (terms from the text generator are not repe
 | 16 | **Data Leakage** | When test data accidentally appears in training data, giving falsely optimistic accuracy numbers |
 | 17 | **Teacher Forcing Ratio** | The probability of using the correct token vs the model's own prediction during training (1.0 = always correct, 0.0 = always own prediction) |
 | 18 | **Substitution Check** | Verifying an answer by plugging the value back into the original equation and checking both sides are equal |
+| 19 | **Learning Rate Scheduler** | Automatically reduces the learning rate during training (e.g., halve every 15 epochs) so early epochs learn fast and later epochs fine-tune |
+| 20 | **StepLR** | A PyTorch scheduler that multiplies the learning rate by gamma every step_size epochs (e.g., 0.002 → 0.001 → 0.0005) |
+| 21 | **CrossEntropyLoss** | Loss function that measures how wrong the model's probability predictions are — penalizes confident wrong answers heavily |
+| 22 | **ignore_index** | Parameter in CrossEntropyLoss that tells it to skip certain positions (like `<PAD>`) when computing the loss |
 
 ---
 
-*This document is updated with each step. Last updated: Step 07 (seq2seq model).*
+*This document is updated with each step. Last updated: Step 08 (training loop).*
