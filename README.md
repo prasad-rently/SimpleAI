@@ -114,6 +114,28 @@ Each step is on its own branch with a PR showing exactly what changed:
      text              numbers           128-dim vectors     256-dim context     48 scores        prediction
 ```
 
+## Project 2: Algebra Solver
+
+After the text generator, we built an **equation solver** using a seq2seq (encoder-decoder) architecture:
+
+```
+"2x + 3 = 7" → Encoder (Bidirectional GRU) → Context Vector → Decoder (GRU) → "x = 2"
+```
+
+- **1.16M parameters** trained on 50,000 synthetic equations
+- **94.6% accuracy** on unseen test equations
+- Supports 7 equation types: `ax=b`, `ax+b=c`, `ax-b=c`, `b+ax=c`, `b-ax=c`, `x/a=b`, `ax+b=cx+d`
+- Interactive solver with substitution verification
+
+```bash
+# Run the interactive solver
+PYTHONPATH=algebra/src python3 algebra/src/interactive.py
+```
+
+See [algebra/README.md](algebra/README.md) for full documentation and the 13-step learning path.
+
+---
+
 ## Documentation
 
 See [TECHNICAL_DOC.md](TECHNICAL_DOC.md) for detailed documentation of every file, method, and concept with flow diagrams and input/output examples.
