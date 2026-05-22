@@ -195,6 +195,8 @@ Epochs:          50
 
 ## Documentation
 
+- [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — step-by-step trace through the model internals with real values
 - [TECHNICAL_DOC.md](TECHNICAL_DOC.md) — detailed docs for every file, method, and concept
+- [TESTING_GUIDE.md](TESTING_GUIDE.md) — how to run, test, and what to expect
 - [REQUIREMENTS.md](REQUIREMENTS.md) — 13-step execution plan
 - [VALIDATION_PLAN.md](VALIDATION_PLAN.md) — test criteria for each step
