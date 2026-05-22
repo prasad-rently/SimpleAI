@@ -482,6 +482,48 @@ Verify:
 
 ---
 
+## Experiment Results
+
+Four experiments were run (10 epochs each) to understand what affects accuracy:
+
+### Experiment 1: Data Size
+```
+ 2,000 examples →  2% accuracy   (not enough to learn patterns)
+10,000 examples → 37% accuracy   (learns structure, struggles with digits)
+40,000 examples → 63% accuracy   (strong learning, would reach 94%+ with more epochs)
+```
+**Takeaway:** More data helps significantly. The model needs at least 10K examples to start learning, and 40K+ to reach high accuracy.
+
+### Experiment 2: Model Size
+```
+Small  (enc=64,  dec=128)    319K params → 57% accuracy
+Medium (enc=128, dec=256)  1,160K params → 63% accuracy  ← our default
+Large  (enc=256, dec=512)  4,415K params → 61% accuracy
+```
+**Takeaway:** Bigger is not always better. The large model is 4x bigger but slightly worse than medium — it needs more training time to leverage its extra capacity. Medium is the sweet spot for this task.
+
+### Experiment 3: Equation Complexity
+```
+Type 1: ax = b           → 99.4%  (easiest — simple pattern)
+Type 2: ax + b = c        → 97.8%
+Type 3: ax - b = c        → 97.1%
+Type 4: b + ax = c        → 98.3%
+Type 5: b - ax = c        → 97.7%
+Type 6: x / a = b         → 65.9%  (hardest — large multi-digit answers)
+Type 7: ax + b = cx + d   → 87.2%  (harder — x on both sides)
+```
+**Takeaway:** Division is the hardest because x = a×b produces large numbers. Types 1-5 are all above 97%. Type 7 (x on both sides) requires more reasoning.
+
+### Experiment 4: Teacher Forcing
+```
+Always (TF=1.0) → 67% accuracy
+Half   (TF=0.5) → 68% accuracy  ← best in 10 epochs
+Never  (TF=0.0) → 62% accuracy
+```
+**Takeaway:** Teacher forcing is critical for learning. Without it (TF=0), the model learns much slower. TF=0.5 slightly outperforms TF=1.0 because the model also practices generating on its own. Our scheduled approach (1.0→0.3) gets the best of both.
+
+---
+
 ## File Reference
 
 *(Updated as files are created)*
@@ -536,4 +578,4 @@ New terms introduced in this project (terms from the text generator are not repe
 
 ---
 
-*This document is updated with each step. Last updated: Step 09 (evaluation).*
+*This document is updated with each step. Last updated: Step 13 (experiments — final step).*
