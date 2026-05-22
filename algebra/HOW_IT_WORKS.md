@@ -533,13 +533,13 @@ Epoch 50: Loss 0.0098  Accuracy 94.6%  ← final accuracy
 
 ## What the Model Actually Learned
 
-The model doesn't "know" algebra. It learned statistical patterns:
+The model doesn't "know" algebra. It has no concept of addition, subtraction, or solving for x. It learned **statistical patterns** from 40,000 training examples:
 
 ### Pattern 1: Output format
-Every answer starts with "x = ". The model learns this in the first few epochs because it's 100% consistent across all 50,000 examples.
+Every answer starts with "x = ". The model learns this in the first few epochs because it's 100% consistent across all 50,000 examples. By epoch 3, the model always generates "x = " as the first 4 tokens.
 
 ### Pattern 2: Single-digit answers
-For "3x = 12", the model learned that when the coefficient divides evenly into the constant, the answer is a single digit. It doesn't compute 12/3 — it recognizes the pattern from thousands of similar examples.
+For "3x = 12", the model learned that when the coefficient divides evenly into the constant, the answer is a single digit. It doesn't compute 12/3 — it recognizes the pattern from thousands of similar examples in training.
 
 ### Pattern 3: Negative answers
 For "2x + 10 = 4", the answer is negative. The model learned that when the constant on the left is larger than the right side (for positive coefficients), the answer is negative. It outputs "-" before the digit.
@@ -547,13 +547,176 @@ For "2x + 10 = 4", the answer is negative. The model learned that when the const
 ### Pattern 4: Multi-digit answers
 For "-15x + 20 = -280", the model must output "x = 20" — two digits. It learned to predict each digit left-to-right: first "2", then "0", then `<EOS>`.
 
-### What it struggles with
-- **Division (Type 6)**: "x / 4 = 3" → x = 12 requires multiplying, which produces large numbers the model hasn't seen as often
-- **Large numbers**: Predicting "x = -280" requires getting three digits right in sequence — one wrong digit means the whole answer is wrong
+### The fundamental limitation
+
+**The model is a pattern matcher, not a calculator.** When it sees an equation it has seen similar versions of during training, it does well. When it sees a pattern it has **never** encountered, it fails — sometimes confidently.
 
 ---
 
-## Comparing Two Equations
+## Where the Model Fails — Error Analysis
+
+### Overall error statistics
+
+Out of 10,000 test equations, the model gets **542 wrong** (5.4% error rate). Here's what those errors look like:
+
+```
+Error Type          Count    % of Errors
+─────────────────────────────────────────
+Off by 1              414       76%       ← most common by far
+Off by 2-5            101       19%
+Off by large amount    27        5%
+Wrong sign              1       <1%
+Garbled output          0        0%
+```
+
+**Key insight: 76% of all errors are off by exactly 1.** The model almost always gets the right ballpark — it just sometimes picks the neighboring digit. There are zero garbled outputs — the model always produces valid "x = N" format.
+
+### Error examples by equation type
+
+```
+Type 1 (ax = b) — 99.4% accurate, errors are rare:
+  3x = 60           predicted: x = 19    expected: x = 20    (off by 1)
+
+Type 2 (ax + b = c) — 97.8% accurate:
+  x + 8 = -14       predicted: x = -23   expected: x = -22   (off by 1)
+  3x + 15 = -93     predicted: x = -35   expected: x = -36   (off by 1)
+
+Type 6 (x / a = b) — 65.9% accurate, worst type:
+  x / -12 = -20     predicted: x = 260   expected: x = 240   (off by 20!)
+  x / 4 = 16        predicted: x = 68    expected: x = 64    (off by 4)
+
+Type 7 (ax + b = cx + d) — 87.2% accurate:
+  2x + 19 = -4x + 127   predicted: x = 19   expected: x = 18   (off by 1)
+```
+
+### Why off-by-one errors happen
+
+The model predicts each digit independently, left to right. For "x = 20", it must:
+1. Predict "2" correctly (tens digit)
+2. Predict "0" correctly (ones digit)
+
+When the model gets the tens digit right but the ones digit wrong by 1, the answer is off by 1. For example:
+
+```
+Target: x = 20
+Model predicts:
+  "2" → correct (90% confident)
+  "0" → wrong, picks "1" instead (48% vs 45% confidence)
+Result: x = 21 (off by 1)
+```
+
+The ones digit is hardest because small changes in the equation can flip it between adjacent values.
+
+### Why Type 6 (division) is the worst
+
+Division equations like `x / 4 = 3` require the answer `x = 12` (multiply 4 x 3). Problems:
+
+1. **Few training examples**: only 1,602 out of 50,000 (3.2%) are division
+2. **Large answers**: x = a x b can reach 280+, producing 3-digit numbers
+3. **Digit prediction compounds errors**: for "x = 240", the model must get 3 digits right in sequence — each digit has maybe 70% accuracy, so overall: 0.7 x 0.7 x 0.7 = 34% chance of getting all three right
+
+---
+
+## A Real Failure: "5x + 5 = 10x - 20"
+
+This equation exposes a critical limitation. The correct answer is **x = 5**, but the model predicts **x = -4** with 100% confidence at every step:
+
+```
+Equation: 5x + 5 = 10x - 20
+Correct:  x = 5
+
+Model step-by-step:
+  Step 0: <SOS> → "x"   (100% confident)
+  Step 1: "x"   → " "   (100% confident)
+  Step 2: " "   → "="   (100% confident)
+  Step 3: "="   → " "   (100% confident)
+  Step 4: " "   → "-"   (100% confident)  ← WRONG! Should be no "-"
+  Step 5: "-"   → "4"   (100% confident)  ← WRONG! Should be "5"
+  Step 6: "4"   → <EOS> (100% confident)
+
+Result: "x = -4"  ← completely wrong, but model is 100% sure
+```
+
+### Why does this happen?
+
+The model is **100% confident** and **100% wrong**. This is the most dangerous type of error. Here's why:
+
+**The training data never contains this equation format.**
+
+All 10,763 Type 7 equations in the training data are formatted as:
+```
+ax + b = cx + d      ← always uses "+" on the right side
+```
+
+When `d` is negative, the generator formats it as:
+```
+3x + 2 = x + -8     ← writes "+ -8", NOT "- 8"
+```
+
+But the user typed:
+```
+5x + 5 = 10x - 20   ← uses "-" on the right side
+```
+
+The model has **never seen a minus sign on the right side** of a Type 7 equation. This is called an **out-of-distribution** input — it falls outside the patterns the model was trained on.
+
+### The root cause in code
+
+In `generate_data.py`, the Type 7 generator always uses this format:
+
+```python
+equation = f"{ax} + {b} = {cx} + {format_number(d)}"
+#                                  ^^^^^^^^^^^^^^^^^
+#                                  always "+" even when d is negative
+#                                  produces: "x + -8" not "x - 8"
+```
+
+So the model learned:
+- `"+ -20"` → means negative 20 on the right (from training data)
+- `"- 20"` → model has NO IDEA what this means (never seen it)
+
+When the model encounters `"- 20"`, it doesn't understand the subtraction and produces a wrong answer with full confidence — because within its training distribution, it has no reason to be uncertain.
+
+### This is a pattern recognition problem, not a math problem
+
+A human looks at `5x + 5 = 10x - 20` and `5x + 5 = 10x + -20` and sees the same equation. The model sees two **completely different character sequences** and treats them as different problems. It has no understanding of mathematics — only character patterns.
+
+---
+
+## Why the Model Is Confidently Wrong
+
+This is one of the most important lessons in machine learning:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│   High confidence does NOT mean the answer is correct.          │
+│                                                                 │
+│   The model can be 100% sure and 100% wrong when the input     │
+│   is outside its training distribution.                         │
+│                                                                 │
+│   This is why real AI systems need:                             │
+│   1. Diverse training data covering edge cases                  │
+│   2. Verification systems (like substitution checking)          │
+│   3. Uncertainty estimation (knowing when you don't know)       │
+│   4. Human oversight for critical decisions                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The model's `:verify` mode catches this error immediately:
+```
+>> :verify
+>> 5x + 5 = 10x - 20
+   x = -4
+   Check: 5x + 5 → -15,  10x - 20 → -60  ✗   ← caught!
+```
+
+This is why verification systems matter — the model can't tell you when it's wrong, but math can.
+
+---
+
+## Comparing Three Equations
 
 ### Easy: "3x = 12" (Type 1, 99.4% accuracy)
 
@@ -566,11 +729,10 @@ Decoder generates:
        → "4" (99.8%)  → <EOS> (100%)
 
 Result: "x = 4" ✓
+Why it works: Simple pattern, single digit, seen thousands of similar examples.
 ```
 
-Simple pattern: single coefficient, single constant, answer is one digit.
-
-### Hard: "x / 12 = -9" (Type 6, 65.9% accuracy)
+### Medium: "x / 12 = -9" (Type 6, 65.9% accuracy)
 
 ```
 Encoder reads:  x, /, 1, 2, =, -, 9
@@ -582,9 +744,107 @@ Decoder generates:
        → <EOS> (90%)
 
 Result: "x = -108" ✓ (but only 55% confident on the "8")
+Why it's hard: 3-digit answer, each digit has decreasing confidence.
 ```
 
-The model is less confident on each successive digit of a large number. One wrong digit → wrong answer → counted as incorrect.
+### Failure: "5x + 5 = 10x - 20" (out of distribution)
+
+```
+Encoder reads:  5, x, +, 5, =, 1, 0, x, -, 2, 0
+Context vector: [?, ?, ?, ...]  (confused by never-seen "- 20" pattern)
+
+Decoder generates:
+  <SOS> → "x" (100%)  → " " (100%)  → "=" (100%)  → " " (100%)
+       → "-" (100%)    → "4" (100%)   → <EOS> (100%)
+
+Result: "x = -4" ✗ (100% confident, 100% wrong!)
+Why it fails: "10x - 20" format never appeared in training data.
+              Training data only has "10x + -20" format.
+```
+
+---
+
+## How to Fix These Inaccuracies
+
+### Fix 1: Diversify the training data format
+
+The biggest fix is generating equations in BOTH formats:
+
+```python
+# CURRENT (always uses "+"):
+equation = f"{ax} + {b} = {cx} + {format_number(d)}"
+# Produces: "3x + 2 = x + -8"
+
+# FIXED (use "-" when d is negative):
+if d >= 0:
+    equation = f"{ax} + {b} = {cx} + {d}"
+else:
+    equation = f"{ax} + {b} = {cx} - {abs(d)}"
+# Produces: "3x + 2 = x - 8"
+```
+
+Apply this to ALL equation types — currently Types 2-5 also only use one format. Adding both `"+ -8"` and `"- 8"` variants to the training data would teach the model that both mean the same thing.
+
+### Fix 2: Add more Type 6 (division) examples
+
+Type 6 has only 3.2% of training data but the hardest answers (large multi-digit numbers). Solutions:
+
+```
+Current:  1,602 Type 6 equations  (3.2%)  → 65.9% accuracy
+Better:   5,000 Type 6 equations  (10%)   → likely ~85% accuracy
+Best:    10,000 Type 6 equations  (20%)   → likely ~90% accuracy
+```
+
+Also limit divisor range to keep answers smaller (e.g., `x / 4 = 3` → x = 12 is easier than `x / 19 = 18` → x = 342).
+
+### Fix 3: Train for more epochs with lower learning rate
+
+The model reached 94.6% at epoch 50. Training longer could push accuracy higher:
+
+```
+Current:   50 epochs  → 94.6%
+Extended: 100 epochs  → likely ~96-97%
+Extended: 200 epochs  → likely ~97-98% (diminishing returns)
+```
+
+Combine with a cosine learning rate schedule instead of StepLR for smoother convergence.
+
+### Fix 4: Data augmentation — rewrite equations in multiple formats
+
+For each equation, generate multiple equivalent representations:
+
+```
+Original:  "2x + 3 = 7"
+Augmented: "3 + 2x = 7"     (swap terms on left)
+           "7 = 2x + 3"     (swap sides)
+           "7 = 3 + 2x"     (swap sides + swap terms)
+```
+
+This teaches the model that format doesn't change the answer — making it robust to variations like `"10x - 20"` vs `"10x + -20"`.
+
+### Fix 5: Add an attention mechanism
+
+Currently the decoder only sees the context vector — a 256-number summary of the entire equation. With **attention**, the decoder can "look back" at specific parts of the equation while generating each digit:
+
+```
+Without attention:
+  Decoder sees: [0.97, -0.89, ...]  (compressed summary — lost details)
+
+With attention:
+  Generating "2": decoder looks at the "7" and "3" positions in the encoder
+  Generating "-": decoder looks at the coefficient signs
+```
+
+Attention is what made seq2seq models dramatically better and eventually led to the Transformer architecture used in ChatGPT and Claude.
+
+### Fix 6: Use a Transformer instead of GRU
+
+Modern models use Transformers, which:
+- Process all positions in parallel (faster)
+- Have built-in attention at every layer (better accuracy)
+- Scale better to larger datasets and harder problems
+
+For this 50K-equation task, a small Transformer would likely achieve 98%+ accuracy.
 
 ---
 
@@ -603,7 +863,24 @@ Substitute x = 2:
   7 == 7  → ✓ CORRECT
 ```
 
-The interactive solver's `:verify` mode does this automatically. In the evaluation, **100% of the model's correct predictions pass substitution verification** — when the model gets the right answer, it's genuinely right.
+The interactive solver's `:verify` mode does this automatically:
+
+```
+>> :verify
+   Verification mode: ON
+
+>> 2x + 3 = 7
+   x = 2
+   Check: 2x + 3 → 7,  7 → 7  ✓
+
+>> 5x + 5 = 10x - 20
+   x = -4
+   Check: 5x + 5 → -15,  10x - 20 → -60  ✗   ← WRONG! Caught by verification
+```
+
+In the evaluation, **100% of the model's correct predictions pass substitution verification** — when the model gets the right answer, it's genuinely right. But verification is most valuable for catching the 5.4% of answers that are wrong.
+
+**Lesson: Never trust a model's confidence. Always verify with an independent check when possible.**
 
 ---
 
@@ -625,8 +902,25 @@ OUTPUT: "x = 2"
 
 Total parameters: 1,160,595
 Training time: ~15 minutes
-Final accuracy: 94.6%
+Final accuracy: 94.6% (9,458 / 10,000 correct)
+Error rate: 5.4% (542 wrong — 76% are off by just 1)
 ```
+
+---
+
+## Key Takeaways
+
+1. **The model is a pattern matcher, not a mathematician.** It learns from examples, not from rules. When it sees familiar patterns, it does great. When it sees unfamiliar patterns, it fails.
+
+2. **High confidence doesn't mean correctness.** The model can be 100% confident and completely wrong on out-of-distribution inputs. Always verify.
+
+3. **Training data quality is everything.** The model can only learn what's in the data. Missing equation formats (like `"- 20"` vs `"+ -20"`) create blind spots.
+
+4. **76% of errors are off by just 1.** The model is remarkably close even when wrong — it understands the structure, just sometimes picks the adjacent digit.
+
+5. **Verification catches errors that confidence doesn't.** The `:verify` mode uses substitution to mathematically verify answers — this catches all errors regardless of model confidence.
+
+6. **More data and diverse formats are the best fixes.** Most of the model's weaknesses come from limited training data variety, not from model architecture.
 
 ---
 
